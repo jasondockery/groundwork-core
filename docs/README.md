@@ -1,0 +1,16 @@
+# Shared docs
+
+Current shared operational guidance lives in [AI tools and remote access](ai-tools-and-remote-access.md) and [Tailscale](tailscale.md). Each environment repo adds its own install and OS-specific steps. Keep shared security policy here, referenced rather than copied.
+
+The learning curriculum stays at the original [Groundwork site](https://jasondockery.github.io/groundwork/) for now. The imported HTML pages below are historical reference from the initial split, not the current learner navigation.
+
+The HTML still has the original site menu. Links to setup, tmux keys, the shell, Homebrew, and the Mac desktop go to `groundwork-mac`, which has those pages. They are not copied here.
+
+| Here | Lives in the environment repo |
+|---|---|
+| Why, the path, practice, agent supervision, learning tracks, T3 Code/Herdr/Tailscale guidance | Install, chezmoi, bootstrap |
+| AI tool pages and the knowledge-base habit | Shell, tmux, Neovim, and Git as that environment configures them |
+| Glossary and resource list | macOS desktop, keyboard, apps |
+| | Omarchy decisions, trackpad, keyd, upstream bugs |
+
+`command-line.html` is the Unix foundation. It still mentions Groundwork commands in places. The keys and the installer are not the point of that page.
