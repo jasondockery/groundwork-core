@@ -43,6 +43,8 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 
 Shell config, tmux keys, Homebrew, chezmoi, macOS defaults, Hyprland, keyd, and package names. Omarchy's tmux prefix is Ctrl+Space, with Ctrl+B still available. `groundwork-mac` uses that prefix and Omarchy's no-prefix chords (`Alt+Enter`, `Alt+Shift+Enter`, `Alt+Escape`, `Ctrl+Alt+Arrow`, `Alt+Left`, and `Alt+Right`). Omarchy keeps its own tmux file and desktop Super keys. Install operations remain in environment repos.
 
+When an installer needs an administrator password, it asks once at the start if a terminal is available. When nobody is there to answer, it sets aside only those privileged steps, continues the rest, and retries them on the next apply from a terminal. That partial install is not recorded as finished. A prerequisite for everything after it, such as the Linux packages Homebrew itself needs, stops and prints the recovery command instead of continuing. `groundwork-linux` and `groundwork-windows` use the `groundwork-mac` engine for this. Omarchy asks in its own `install.sh` before the first privileged change.
+
 The copied HTML pages in `docs/` still carry the original site navigation, including links to environment pages that are absent here. Use the original Groundwork site for curriculum while that migration is deferred. Current operational guides are the linked Markdown documents; do not direct a new learner into the copied HTML navigation.
 
 ## Why a submodule

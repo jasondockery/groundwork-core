@@ -13,6 +13,7 @@ Read `README.md` and `AI_THESIS.md` before changing the shared pages.
 - The original Groundwork repo stays where it is. These family repos are the split.
 - Keep the original `groundwork` repo unchanged; it is curriculum and historical context for this task. Omarchy's conventions are the target where they fit, not the older Groundwork keymap.
 - Tailscale policy, security guidance, MagicDNS, and connection verification have one source in `docs/tailscale.md`. Installation and OS permissions stay in environment repos.
+- An installer that needs administrator permission asks once at the start when a terminal is available. When nobody can enter a password, it sets aside only the steps that need that permission, continues the rest, and retries those steps on the next apply from a terminal. It does not record that partial install as finished. A step later work depends on, such as the Linux packages Homebrew itself needs, stops with a recovery command instead of continuing.
 - T3 Code Nightly and Herdr are the selected shared tool direction; do not invent an upstream `edge` channel or install anything from this documentation-only repo.
 - Use [Compass](https://github.com/jasondockery/compass) as shared engineering guidance and the shared Renovate preset for dependency policy. These references do not imply receipt-verified projection or central-runner coverage.
 
