@@ -20,3 +20,5 @@ Use the upstream [T3 Code install guide](https://github.com/pingdotgg/t3code/blo
 ## Tailscale
 
 Use the [shared Tailscale guide](tailscale.md) for tailnet security, MagicDNS, owner-scoped access, SSH check mode, platform capabilities, and two-way verification. Environment repos own installation, service startup, and OS permissions; they reference that guide rather than copying its policy.
+
+For visual agent supervision, follow [desktop access](tailscale.md#agent-tools-and-screens) as well as SSH setup. Tailscale's machine list proves enrollment, not screen sharing: each host needs its appropriate desktop server and network port grant. Omarchy configures WayVNC automatically; native macOS, Linux desktop, and Windows services retain their required local permission and credential steps. Use each OS's supported client rather than forcing one protocol everywhere.
