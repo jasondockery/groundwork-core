@@ -78,7 +78,30 @@ ssh -N -L 127.0.0.1:3300:127.0.0.1:3000 LOCAL_USER@MACHINE
 
 Open `http://127.0.0.1:3300` locally. For T3 Code, substitute its actual listening port printed at startup. Do not bind agent interfaces to `0.0.0.0` just to reach them remotely.
 
-Screen sharing is a separate, optional service. macOS Screen Sharing, Windows RDP, and Wayland screen-sharing servers have different setup and permissions. Add a narrowly scoped tailnet grant for the specific service only when you choose it; the terminal-only example above intentionally does not allow desktop ports. No port forwarding, Funnel, subnet routes, or exit node is required for machine-to-machine SSH.
+Tailscale enrollment alone does not install or enable a desktop-sharing server. Groundwork prepares the appropriate desktop path in each environment; local OS permissions, device enrollment, and cross-machine acceptance remain necessary. Headless systems, development containers, and WSL do not get a desktop server from the Unix provisioning engine.
+
+| Destination | Server and supported client |
+|---|---|
+| Apple Silicon Omarchy | Its installer configures authenticated WayVNC to start with the logged-in desktop, restricted to the Tailscale interface. Use macOS Screen Sharing or a supported VNC client on TCP 5900. |
+| macOS desktop | Native Screen Sharing; approve it once in System Settings and allow only intended local users. macOS then owns automatic startup. Use Screen Sharing from another Mac. |
+| Other Linux desktop | Use the desktop's supported sharing service; GNOME uses its native Remote Desktop settings and RDP client. Follow the Linux environment guide instead of installing a competing desktop or applying Omarchy files. |
+| Windows host | Native RDP on supported Windows editions, with Network Level Authentication and a Tailscale-scoped host firewall rule. Use Windows App or another supported RDP client. Windows Home cannot host native RDP. WSL is not the Windows desktop server. |
+
+For desktop access, add a separate owner-scoped network grant to your private tailnet policy. Retain the SSH grant/check-mode rule above. Include only the ports actually selected on your hosts: TCP 5900 for VNC/Screen Sharing, TCP 3389 for Windows RDP, or the actual port shown by the Linux RDP server (often 3389 or 3390). For example, when only VNC is selected:
+
+```json
+{
+  "src": ["autogroup:member"],
+  "dst": ["autogroup:self"],
+  "ip": ["tcp:5900"]
+}
+```
+
+This is one grant object to reconcile into `grants`, not a replacement policy. Validate that your own approved devices can reach the selected port and other users cannot. An SSH check-mode rule applies to SSH, not to VNC or RDP authentication. A broader existing allow rule still overrides the intended restriction; review all effective grants.
+
+The service must also be installed, running, authenticated, and allowed by the host firewall. Tailnet rules do not filter ordinary LAN traffic. Omarchy enforces `tailscale0` on the listening socket; native OS services may listen on other interfaces, so use their supported host/network restrictions when needed. Do not disable a firewall or open a router port to work around a failed connection. No Funnel, subnet routes, or exit node is required.
+
+Verify viewing and keyboard/mouse control from a second device, then repeat after reboot and desktop login. Desktop startup does not bypass disk encryption, OS privacy consent, the lock screen, or sleep/power limitations. Use terminal access separately for recovery. Passwords, certificates, tailnet policy, and machine addresses stay local, outside Git.
 
 ## Keep it working
 
