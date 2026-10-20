@@ -53,6 +53,9 @@ This repo is shared by more than one installer and each installer should choose 
 
 ## Omarchy boundary
 
+See [Updating Groundwork](docs/updating.md) for the common `update-all` and
+`groundwork-update` workflow, platform ownership, and retry behavior.
+
 On Omarchy, do not apply `groundwork-mac`. The [Omarchy manual](https://omarchy.org/manual/dotfiles/) treats `~/.config` as the user's files and `/usr/share/omarchy` as the package. [groundwork-omarchy-mac-arm64](https://github.com/jasondockery/groundwork-omarchy-mac-arm64) only overrides files Omarchy already expects the user to own.
 
 ## Common setup and container migration
