@@ -32,7 +32,7 @@ entry has an `id` and a `reason`. Batch 1 has an empty array.
 
 ## Batch 1
 
-Each plugin is batch 1 and is installed on `aarch64` and `x86_64`.
+Six plugins. Each is batch 1 and is installed on `aarch64` and `x86_64`.
 
 | Id | Reason |
 | --- | --- |
@@ -42,15 +42,6 @@ Each plugin is batch 1 and is installed on `aarch64` and `x86_64`.
 | `io.github.juancasanueva.plugin-manager` | The single plugin manager. Its installs and updates are pinned to verified commits, it has a marketplace browser, and it is more active than omaplug. |
 | `davedes.netspeed` | Live network speed. |
 | `crmne.mpris` | Media controls with album art. The built-in media widget is absent from the default bar. |
-
-## Deferred
-
-Requested for batch 1 and held back. `retired` is for plugins this list
-previously installed, so a held-back plugin is recorded here.
-
-| Id | Reason |
-| --- | --- |
-| `jankeesvw.notification-center` | Requested for batch 1. Held back until its watcher reads the shell's `live.json` and `history.json`. |
 
 ## Left out
 
