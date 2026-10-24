@@ -192,7 +192,11 @@ class SyncthingDocsTest(unittest.TestCase):
             "never deletes the main database",
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
             "delete only the sibling `name.db~`",
-            "leave the temp so NeDB can rename it back",
+            "If the shared file is absent, do not launch.",
+            "rename the temp onto `name.db` while holding the lock",
+            "Delete `name.db~` only when the main file was already there.",
+            "If the lock is busy and no FreeTube process exists, exit without launching.",
+            "Only the holder launches, and only after the pause.",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
@@ -215,6 +219,9 @@ class SyncthingDocsTest(unittest.TestCase):
             "`LockFileEx` with `LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY`",
             "on a handle kept open for the same span",
             "Busy means a live holder",
+            "If the lock is busy and a FreeTube process exists, start FreeTube only to focus the running instance",
+            "If the lock is busy and no FreeTube process exists, exit without launching.",
+            "Only the holder launches, and only after the pause.",
             "When the kernel has released the lock, the next launch is the holder and must pause.",
             "closing the window does not quit",
             "`open -W`",
@@ -228,7 +235,9 @@ class SyncthingDocsTest(unittest.TestCase):
             "If the shared file is already there, stop and print both paths.",
             "Do not resume while any of the four names is still a regular file.",
             "When no FreeTube process exists and the main database exists, delete only the sibling `name.db~`, then resume.",
-            "If the main file is absent and only the temp exists, leave the temp",
+            "Delete `name.db~` only when the main file was already there.",
+            "rename the temp onto `name.db` while holding the lock",
+            "If the shared file is absent, do not launch.",
             "The apply takes the same non-blocking lock",
             "If it is busy, do not resume, move, or relink.",
             'body `{"paused": false}` only',
@@ -236,11 +245,15 @@ class SyncthingDocsTest(unittest.TestCase):
             "Do not `PUT` a default folder object over a paused folder.",
             "Any other `lstat` result: print the paths, change nothing, and do not launch.",
             "The service must not set `STGUIADDRESS` or `--gui-address`.",
-            "The step is finished only when the GUI socket is `127.0.0.1:8384`",
+            "The override hides the config value",
+            "does not rewrite `config.xml`",
+            "The step stays unfinished until the override is unset and the listening socket is `127.0.0.1:8384`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
         self.assertNotIn("Close it and wait", text)
+        self.assertNotIn("replaces the address in config", text)
+        self.assertNotIn("leave the temp so NeDB can rename it back", text)
         self.assertLess(
             text.index("exclusive non-blocking lock"),
             text.index("Classify each data-dir path with `lstat`"),
