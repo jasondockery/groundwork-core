@@ -25,23 +25,11 @@ SECRET_MARKERS = (
     "BEGIN EC PRIVATE KEY",
 )
 
-OVERRIDE_SETTINGS = (
-    "options.listenAddress",
+FALSE_OVERRIDES = (
     "options.relaysEnabled",
     "options.globalAnnounceEnabled",
     "options.localAnnounceEnabled",
     "options.natEnabled",
-    "options.announceLANAddresses",
-    "STNODEFAULTFOLDER",
-    "device.addresses",
-    "device.allowedNetworks",
-)
-
-KEPT_SETTINGS = (
-    "gui.address",
-    "gui.user",
-    "options.urAccepted",
-    "options.crashReportingEnabled",
 )
 
 
@@ -137,31 +125,82 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertIn("%APPDATA%\\FreeTube", text)
         self.assertIn("~/.config/FreeTube", text)
 
-    def test_every_override_has_a_reason(self) -> None:
+    def test_override_values_and_reasons(self) -> None:
         text = DEFINITION.read_text()
-        rows = {row[0].strip("`"): row for row in _table_rows(text, "Setting")}
-        # The first table whose header contains Setting is the override table.
         override_rows = _table_rows(text, "| Setting | Value | Reason |")
-        found = {row[0].strip("`") for row in override_rows}
-        self.assertEqual(found, set(OVERRIDE_SETTINGS))
+        by_setting = {row[0]: row[1] for row in override_rows}
+        self.assertNotIn("announceLANAddresses", text)
+
+        def value_for(needle: str) -> str:
+            matches = [value for setting, value in by_setting.items() if needle in setting]
+            self.assertEqual(len(matches), 1, needle)
+            return matches[0]
+
+        for setting in FALSE_OVERRIDES:
+            with self.subTest(setting=setting):
+                self.assertEqual(value_for(setting).strip("`"), "false")
+        self.assertEqual(value_for("STNODEFAULTFOLDER").strip("`"), "1")
+        networks = value_for("device.allowedNetworks")
+        self.assertIn("100.64.0.0/10", networks)
+        self.assertIn("fd7a:115c:a1e0::/48", networks)
+        listen_setting = next(setting for setting in by_setting if "listenAddresses" in setting)
+        self.assertIn("listenAddress", listen_setting)
+        self.assertIn("`PATCH /rest/config/options` with `listenAddresses`", text)
+        self.assertIn("repeated `listenAddress` elements in `config.xml`", text)
         for row in override_rows:
             with self.subTest(setting=row[0]):
                 self.assertGreaterEqual(len(row), 3)
                 self.assertGreater(len(row[2]), 40)
                 self.assertNotIn("TODO", row[2])
-        kept = _table_rows(text, "| Setting | Kept value | Reason |")
-        kept_names = " ".join(row[0] for row in kept)
-        for setting in KEPT_SETTINGS:
-            with self.subTest(kept=setting):
-                self.assertIn(setting, kept_names)
-        gui = next(row for row in kept if "gui.address" in row[0])
-        self.assertIn("127.0.0.1:8384", gui[1])
-        self.assertGreater(len(gui[2]), 40)
-        # `rows` is unused beyond forcing the helper to accept this file.
-        self.assertIn("options.listenAddress", rows)
+
+    def test_later_apply_resets_only_the_gui_address(self) -> None:
+        text = DEFINITION.read_text()
+        self.assertIn("A later apply writes `gui.address` back to `127.0.0.1:8384`", text)
+        self.assertIn(
+            "A later apply leaves `gui.user`, `gui.password`, `options.urAccepted`, "
+            "`options.crashReportingEnabled`, and folder versioning",
+            text,
+        )
+        self.assertNotIn("puts the upstream value back", text)
+
+    def test_freetube_compact_replaces_the_symlink(self) -> None:
+        text = DEFINITION.read_text()
+        for phrase in (
+            "statSync().isSymbolicLink",
+            "filename~",
+            "`paused` true",
+            "including the post-close compact",
+            "FreeTube process exits",
+            "compacted successor",
+            "Recreate the symlink",
+            "`paused` false",
+            "already regular files before the session",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_lead_keeps_credentials_out_of_the_share(self) -> None:
+        paragraphs = [part.strip() for part in DEFINITION.read_text().split("\n\n") if part.strip()]
+        lead = paragraphs[1] if paragraphs[0].startswith("#") else paragraphs[0]
+        self.assertIn("how a file you save on one Groundwork machine shows up on the others", lead)
+        for phrase in ("SSH keys", "tokens", "agent credentials", "~/Shared"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, lead)
+
+    def test_tailscale_syncthing_grant_is_self(self) -> None:
+        text = (ROOT / "docs" / "tailscale.md").read_text()
+        blocks = re.findall(r"```json\n(.*?)```", text, re.S)
+        grant = next(block for block in blocks if "22000" in block)
+        self.assertIn('"dst": ["autogroup:self"]', grant)
+        self.assertIn('"src": ["autogroup:member"]', grant)
+        self.assertIn("tcp:22000", grant)
+        self.assertIn("udp:22000", grant)
 
     def test_pairing_is_local_and_idempotent(self) -> None:
-        text = DEFINITION.read_text().lower()
+        original = DEFINITION.read_text()
+        self.assertIn("current user, `SYSTEM`, and `Administrators`", original)
+        self.assertIn("ACL of both `config.xml` and `key.pem`", original)
+        text = original.lower()
         for phrase in (
             "second run",
             "exits 0",
@@ -170,6 +209,10 @@ class SyncthingDocsTest(unittest.TestCase):
             "mode `0600`",
             "own device id",
             "does not call the other machine",
+            "do not write the folder",
+            "/rest/config/defaults/device",
+            "folder.devices",
+            "key.pem",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
