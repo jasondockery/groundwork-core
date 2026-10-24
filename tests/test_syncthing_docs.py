@@ -32,6 +32,21 @@ FALSE_OVERRIDES = (
     "options.natEnabled",
 )
 
+# Phrases from the old temp matrix and the publish-on-first-launch path.
+_REMOVED_UNSAFE_RULES = (
+    "This first-session path still launches",
+    "This migration path still launches",
+    "rename the data-dir temp onto that shared path",
+    "rename the temp onto `name.db`",
+    "A sole `~/Shared/FreeTube/<name>.db~` becomes",
+    "run temp-normalization",
+    "leave the folder paused",
+    "PATCH /rest/config/folders/groundwork-shared",
+    "delete only the sibling `name.db~`",
+    "The same-directory rename runs only when",
+    "move and symlink every regular file whose shared path is absent, then stop",
+)
+
 
 def _table_rows(text: str, header: str) -> list[list[str]]:
     """Return body rows for the first markdown table whose header contains `header`."""
@@ -99,6 +114,9 @@ class SyncthingDocsTest(unittest.TestCase):
             "~/Shared",
             "~/Shared/FreeTube",
             "groundwork-shared",
+            "groundwork-freetube",
+            "trashcan",
+            "2.1.2",
             "history.db",
             "playlists.db",
             "profiles.db",
@@ -147,6 +165,8 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertIn("listenAddress", listen_setting)
         self.assertIn("`PATCH /rest/config/options` with `listenAddresses`", text)
         self.assertIn("repeated `listenAddress` elements in `config.xml`", text)
+        self.assertIn("trashcan", value_for("folder.versioning"))
+        self.assertIn("cleanoutDays", value_for("folder.versioning"))
         for row in override_rows:
             with self.subTest(setting=row[0]):
                 self.assertGreaterEqual(len(row), 3)
@@ -191,61 +211,48 @@ class SyncthingDocsTest(unittest.TestCase):
             "pattern `*~`",
             "never deletes the main database",
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
-            "delete only the sibling `name.db~`",
-            "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent, with no temp in either directory: do not launch.",
-            "Print the missing path and stop rather than reclassifying in a loop.",
-            "Before the case list, under the lock, with no FreeTube process, run temp-normalization.",
-            "scan both the package data directory and `~/Shared/FreeTube`",
-            "A symlink, including a dangling one, is never a main.",
-            "rename the temp onto `name.db` in that same directory",
-            "Never rename onto the data-dir symlink path.",
-            "A local regular database beside its sibling `name.db~`",
-            "A sole `name.db~` in the data directory",
-            "A sole `~/Shared/FreeTube/<name>.db~` becomes `~/Shared/FreeTube/<name>.db`.",
-            "A restored shared file is not the migration path.",
-            "A symlink whose target now exists is this leave-it case.",
-            "If the data-dir name is a symlink and the temp is in the data directory, never rename onto the symlink.",
-            "rename the data-dir temp onto that shared path",
-            "Delete the data-dir temp only when the shared regular file is non-empty.",
-            "decide the empty case before any temp deletion",
-            "print the empty file and those temps, delete nothing, and do not fall through",
-            "An empty shared file with no temp is leave-it and a present shared file.",
-            "The refusal applies only when that empty file has a non-empty temp in either directory.",
-            "An empty shared file with a non-empty temp is not a present shared file and not leave-it.",
-            "A non-empty shared file with no such pair stays the present-file case.",
-            "Apply scans both directories and refuses the same way",
-            "That refusal does not apply to a name whose deletion the person confirmed.",
-            "Resume stays per name.",
-            "Do not choose by mtime.",
-            "that case ends normalization for that name",
-            "Do not fall through to the same-directory rename.",
-            "The same-directory rename runs only when the other directory has no sole temp",
-            "Print both temps, rename nothing, and do not launch.",
-            "One pass classifies all four names, then one folder decision.",
-            "Launch only when every name is a launch path",
-            "If any name is both-regular, dangling, or any other `lstat` result, do not launch.",
-            "Never resume while any of the four is still a regular file.",
-            "print the missing path, do not launch, and leave the folder paused",
-            "Resuming would announce the absence as a deletion.",
+            "The FreeTube wrapper never pauses `groundwork-shared`.",
+            "Pause and resume only `groundwork-freetube`.",
+            "When the folder is shared with any other device, FreeTube launches only once the four files are already present locally",
+            "An absent shared file is never a first session or a migration: create nothing, move nothing, resume nothing, and do not launch.",
+            "GET /rest/db/file",
+            "receive-only",
+            "A first session is allowed only when this device is the folder's only member",
+            "Never promote `name.db~` when a main file exists.",
+            "quarantine the temp and migrate the main only",
+            "Offer deletion confirmation only after an in-sync scan shows the file absent on every peer.",
+            "A file on disk, including a 0-byte file, is a present shared file.",
             "Resume only when every name is either a present shared file or a deletion the person confirmed for that specific name.",
             "Printing the path, running apply, or confirming one name does not confirm the others.",
             "Never create an empty database to fill the hole.",
-            "A later apply uses the same per-name rule.",
-            "move and symlink every regular file whose shared path is absent, then stop",
-            "The only resume is the one after that move and after all four names are classified.",
-            "This migration path still launches",
-            "This first-session path still launches",
-            "Delete `name.db~` only when the main file was already there.",
+            "Resuming `sendreceive` while an indexed file is missing announces the absence as a deletion",
             "If the lock is busy and no FreeTube process exists, exit without launching.",
             "Only the holder launches, and only after the pause.",
+            "Do not choose by mtime.",
+            "A symlink is not a main.",
+            "Print the missing path and stop rather than reclassifying in a loop.",
+            "One pass classifies all four names, then one folder decision.",
+            "Launch only when every name is already present locally",
+            "If the shared file is already there, stop and print both paths.",
+            "versioning.type` `trashcan`",
+            "cleanoutDays` `0`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
+        for phrase in _REMOVED_UNSAFE_RULES:
+            with self.subTest(removed=phrase):
+                self.assertNotIn(phrase, text)
         self.assertNotIn("compacted successor", text)
         self.assertNotIn("keep the newer", text)
         self.assertLess(text.index("compare its path"), text.index("already in `folder.devices`"))
+        self.assertLess(
+            text.index("When the folder is shared with any other device"),
+            text.index("A first session is allowed only when this device is the folder's only member"),
+        )
         self.assertIn("The data-dir symlink survives", decision)
         self.assertIn("classifies each data-dir name with `lstat`", decision)
+        self.assertIn("an absent file is not a first session and not a migration", decision)
+        self.assertIn("only when this device is the folder's only member", decision)
         self.assertNotIn("replaces the symlink", decision)
         self.assertNotIn("moves the compacted file back", decision)
         self.assertIn("The cheatsheet says Quit, not close the window.", decision)
@@ -272,52 +279,19 @@ class SyncthingDocsTest(unittest.TestCase):
             "not for `open` or `start` to return",
             "Resume stays tied to process exit.",
             "Still holding the lock, after the process is gone",
-            "move and symlink every regular file whose shared path is absent, then stop",
             "If the shared file is already there, stop and print both paths.",
-            "Do not resume while any of the four names is still a regular file.",
-            "Delete `name.db~` only when the main file was already there.",
-            "rename the temp onto `name.db` in that same directory",
-            "Never rename onto the data-dir symlink path.",
-            "A sole `~/Shared/FreeTube/<name>.db~` becomes `~/Shared/FreeTube/<name>.db`.",
-            "A restored shared file is not the migration path.",
-            "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent, with no temp in either directory: do not launch.",
-            "Print the missing path and stop rather than reclassifying in a loop.",
-            "A local regular database beside its sibling `name.db~`",
-            "A sole `name.db~` in the data directory",
-            "If the data-dir name is a symlink and the temp is in the data directory, never rename onto the symlink.",
-            "rename the data-dir temp onto that shared path",
-            "Delete the data-dir temp only when the shared regular file is non-empty.",
-            "decide the empty case before any temp deletion",
-            "print the empty file and those temps, delete nothing, and do not fall through",
-            "An empty shared file with no temp is leave-it and a present shared file.",
-            "The refusal applies only when that empty file has a non-empty temp in either directory.",
-            "An empty shared file with a non-empty temp is not a present shared file and not leave-it.",
-            "A non-empty shared file with no such pair stays the present-file case.",
-            "Apply scans both directories and refuses the same way",
-            "That refusal does not apply to a name whose deletion the person confirmed.",
-            "Resume stays per name.",
-            "Do not choose by mtime.",
-            "that case ends normalization for that name",
-            "Do not fall through to the same-directory rename.",
-            "The same-directory rename runs only when the other directory has no sole temp",
-            "Print both temps, rename nothing, and do not launch.",
-            "One pass classifies all four names, then one folder decision.",
-            "Launch only when every name is a launch path",
-            "If any name is both-regular, dangling, or any other `lstat` result, do not launch.",
-            "Never resume while any of the four is still a regular file.",
-            "print the missing path, do not launch, and leave the folder paused",
-            "Resuming would announce the absence as a deletion.",
-            "Resume only when every name is either a present shared file or a deletion the person confirmed for that specific name.",
-            "Printing the path, running apply, or confirming one name does not confirm the others.",
-            "Never create an empty database to fill the hole.",
-            "A later apply uses the same per-name rule.",
-            "move and symlink every regular file whose shared path is absent, then stop",
-            "The only resume is the one after that move and after all four names are classified.",
-            "This migration path still launches",
-            "This first-session path still launches",
+            "Do not resume `sendreceive` while any of the four names is still a regular file",
+            "The FreeTube wrapper never pauses `groundwork-shared`.",
+            "PATCH /rest/config/folders/groundwork-freetube",
+            'body `{"paused": false}` only',
+            "When `tailscale ip -4` fails on a machine that is already serving, do not PATCH `listenAddresses`.",
+            "Keep the addresses already in effect.",
+            "Refuse to apply or wrap",
+            "older than 2.1.2",
+            "10389",
+            "10746",
             "The apply takes the same non-blocking lock",
             "If it is busy, do not resume, move, or relink.",
-            'body `{"paused": false}` only',
             "re-check that no FreeTube process exists",
             "Do not `PUT` a default folder object over a paused folder.",
             "Any other `lstat` result: print the paths, change nothing, and do not launch.",
@@ -325,9 +299,14 @@ class SyncthingDocsTest(unittest.TestCase):
             "The override hides the config value",
             "does not rewrite `config.xml`",
             "The step stays unfinished until the override is unset and the listening socket is `127.0.0.1:8384`",
+            "A later apply uses the same per-name rule.",
+            "POST /rest/db/override",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
+        for phrase in _REMOVED_UNSAFE_RULES:
+            with self.subTest(removed=phrase):
+                self.assertNotIn(phrase, text)
         self.assertNotIn("Close it and wait", text)
         self.assertNotIn("If the shared file is absent, do not launch.", text)
         self.assertNotIn("replaces the address in config", text)
@@ -343,7 +322,7 @@ class SyncthingDocsTest(unittest.TestCase):
             text.index("Classify each data-dir path with `lstat`"),
         )
         self.assertLess(
-            text.index("run temp-normalization"),
+            text.index("Never promote `name.db~` when a main file exists."),
             text.index("Classify each data-dir path with `lstat`"),
         )
 
