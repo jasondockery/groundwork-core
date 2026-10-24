@@ -1,6 +1,6 @@
 # Syncthing shared folders
 
-Syncthing is the default shared folder across Groundwork machines. It runs as a user service on each machine and syncs `~/Shared` over the personal Tailscale tailnet. FreeTube's database files are the first app directory inside that folder. The Omarchy M1 mini stays on so the other machines still have a peer when they sleep.
+This page is how a file you save on one Groundwork machine shows up on the others: the Mac, Linux, Windows, and the Omarchy mini. Syncthing is the default that does it, as a user service over the personal Tailscale tailnet. `~/Shared` is the folder. FreeTube's database files are the first app directory inside it, and the Omarchy M1 mini stays on so the other machines still have a peer when they sleep. SSH keys, tokens, and agent credentials stay in their existing locations, out of `~/Shared`.
 
 This page is the contract. [The decision record](decisions/syncthing-shared-folders.md) explains why Syncthing, why the other candidates were set aside, and why FreeTube still has no sync of its own. Environment repos install the package, start the service, and implement `groundwork syncthing-pair`. They reference this page. They do not keep a second copy of it.
 
@@ -71,7 +71,7 @@ Order on a new machine:
 
 When `tailscale ip -4` fails, stop before step 5. Leave the service disabled and retry on the next apply.
 
-On a machine that is already serving with the upstream listener, patch the same settings over the localhost REST API, restart the user service, and confirm. The API key is read from the local `config.xml` into the request header. It is not printed.
+On a machine that is already serving, `PATCH /rest/config/options` with `listenAddresses` set to that full list, and with `relaysEnabled`, `globalAnnounceEnabled`, `localAnnounceEnabled`, and `natEnabled` set to `false`. `PATCH` replaces `listenAddresses`, so the body carries every URL. Restart the user service only when the list changed, then confirm the running listener. Before the first `serve`, the same URLs are repeated `listenAddress` elements in `config.xml`. The API key is read from the local `config.xml` into the request header. It is not printed.
 
 ### Overrides
 
@@ -79,27 +79,20 @@ Each row is a setting whose upstream default would leave the tailnet. The value 
 
 | Setting | Value | Reason |
 | --- | --- | --- |
-| `options.listenAddress` | localhost TCP 22000, plus TCP and QUIC on the current Tailscale IPv4 and, when present, IPv6 addresses | `default` listens on every interface and joins the public relay pool. |
+| `listenAddress` in config.xml; `listenAddresses` on REST | localhost TCP 22000, plus TCP and QUIC on the current Tailscale IPv4 and, when present, IPv6 addresses | `default` listens on every interface and joins the public relay pool. The pre-start file repeats the XML element `listenAddress`. A running process is updated with `PATCH /rest/config/options` field `listenAddresses`. |
 | `options.relaysEnabled` | `false` | With relays left on, a peer that is briefly unreachable over the tailnet is contacted through the public relay pool. |
 | `options.globalAnnounceEnabled` | `false` | Global announce publishes this device to Syncthing's public discovery servers. Peers use an explicit MagicDNS address instead. |
 | `options.localAnnounceEnabled` | `false` | Local announce broadcasts on the LAN and dials whatever answers. Those machines are outside the tailnet. |
 | `options.natEnabled` | `false` | UPnP and NAT-PMP ask the home router to open port 22000. |
-| `options.announceLANAddresses` | `false` | Announcing the LAN address hands paired devices a path that is not the tailnet. |
-| `STNODEFAULTFOLDER` | `1` in the service environment | The first start otherwise creates `~/Sync`. The shared folder is `~/Shared`. |
+| `STNODEFAULTFOLDER` | `1` | The first start otherwise creates `~/Sync`. The shared folder is `~/Shared`. Set this in the service environment. |
 | `device.addresses` | `tcp://MAGICDNS:22000` and `quic://MAGICDNS:22000` | With discovery off, the upstream address `dynamic` has no way to find the peer. `MAGICDNS` is the other machine's MagicDNS name, entered at pair time. |
 | `device.allowedNetworks` | `100.64.0.0/10` and `fd7a:115c:a1e0::/48` | An empty list, which is the upstream default, accepts that device from any network. These two prefixes are Tailscale's IPv4 and IPv6 ranges. |
 
-### Kept defaults
+### GUI address
 
-The apply checks these and, if a previous run changed them, puts the upstream value back. They are listed so a later change has to add a row to the override table with a reason.
+A later apply writes `gui.address` back to `127.0.0.1:8384` when it differs. The GUI and the REST API share one listen address. `127.0.0.1:8384` is the upstream localhost value. `0.0.0.0` would also listen on the LAN, and that API can read and write every synced file. The Tailscale address alone would drop the local browser. Remote use is the SSH forward above.
 
-| Setting | Kept value | Reason |
-| --- | --- | --- |
-| `gui.address` | `127.0.0.1:8384` | The GUI and the REST API share one listen address. This is the upstream localhost default. `0.0.0.0` would also listen on the LAN, and that API can read and write every synced file. The Tailscale address alone would drop the local browser. Remote use is the SSH forward above. |
-| `gui.user` and `gui.password` | unset | The GUI is on localhost. A password is an extra setting, and the API key remains the local credential. |
-| `options.urAccepted` | unset (`0`, ask) | Usage reporting is the person's choice. The tailnet restriction does not require an answer. |
-| `options.crashReportingEnabled` | upstream default | Crash reporting is independent of where the sync listener binds. |
-| folder versioning | upstream default (off) | Versioning is a backup policy. Conflict copies from NeDB are handled by closing the second writer, not by a versioning scheme. |
+A later apply leaves `gui.user`, `gui.password`, `options.urAccepted`, `options.crashReportingEnabled`, and folder versioning at the values already stored. Those are the person's choices. Groundwork does not write them on a later apply.
 
 Discovery server URLs and the relay server URL stay at `default`. The enabled flags above are what turn them off. Clearing the URLs would be a second edit for the same restriction.
 
@@ -112,14 +105,27 @@ FreeTube's package data directory stays where that package puts it. Groundwork s
 - `profiles.db`
 - `settings.db`
 
-The files live in `~/Shared/FreeTube/`. Each name in the package data directory is a symlink to the matching file. The rest of the data directory (cache, cookies, session storage, lock files, `search-history.db`, `subscription-cache.db`) stays local. Pointing Syncthing at the whole data directory would copy Electron files between operating systems, which FreeTube's maintainer has said is unsafe.
+The files live in `~/Shared/FreeTube/`. Each name in the package data directory is a symlink to the matching file. The rest of the data directory (cache, cookies, session storage, lock files, `search-history.db`, `subscription-cache.db`) stays local. Sharing the whole data directory would copy Electron files between operating systems, which FreeTube's maintainer has said is unsafe. FreeTube 0.25.3 has no supported data-directory setting. Chromium's `--user-data-dir`, and any portable-mode flag, is an unsupported launch flag that has to be passed every time. The symlink plus the session pause below is the mechanism that survives FreeTube's own compact.
 
-Repair runs only while FreeTube is not running. It is idempotent:
+Classify every data-dir path with a stat that does not follow links. FreeTube's own check uses `statSync().isSymbolicLink`. That call follows the link, reports a regular file, and so misses the symlink it is about to replace.
+
+While FreeTube is not running, the first link is:
 
 1. If the data-dir name is already a symlink to `~/Shared/FreeTube/<name>`, leave it.
 2. If the data-dir name is a regular file and the shared file is absent, move the regular file to `~/Shared/FreeTube/<name>` and replace it with the symlink.
-3. If both sides have a regular file, stop. Report both paths. The apply does not pick a winner and does not delete either copy.
-4. If FreeTube replaced a symlink with a new regular file while the shared copy also exists, stop the same way.
+3. If both sides are already regular files before the session, stop and report both paths. The apply does not pick a winner and does not delete either copy.
+
+FreeTube 0.25.3 compacts each NeDB file when the last window closes. It writes `filename~` beside the database and renames that temporary over the database path. The rename replaces the symlink with the compacted file, and `~/Shared/FreeTube/<name>` still holds the pre-compact copy. A repair that only compares the two regular files then stops, which is the wrong outcome for a compact that just finished.
+
+The environment's FreeTube launch path owns that window:
+
+1. Before the process starts, run the three checks above. When both sides are already regular files, stop and report, and do not launch.
+2. Pause folder `groundwork-shared` (`PATCH /rest/config/folders/groundwork-shared` with `paused` true) before launch. The pause lasts for the whole process, including the post-close compact, so Syncthing is not reading the file during the rename.
+3. Wait until the FreeTube process exits. Compact runs during that shutdown. Closing the window is not the signal; process exit is.
+4. After the process exits, if the data-dir path is a regular file, move it onto `~/Shared/FreeTube/<name>`. That file is the compacted successor. Recreate the symlink. A path that is still the correct symlink stays as it is. A leftover `filename~` in the data directory is not one of the four shared names and is not moved into `~/Shared`.
+5. Resume the folder (`paused` false) after the symlink is back.
+
+A second launch with the symlink already in place pauses, waits, adopts a new compacted file if the rename happened again, and resumes. If the launch path is interrupted after compact and before the move, the folder stays paused. The next apply, with FreeTube not running, still sees two regular files that were not classified before a session it watched, so it stops and reports and leaves the folder paused until the person picks a copy. When FreeTube is not running and every data-dir name is the correct symlink, the apply resumes the folder.
 
 A Flatpak build cannot see `~/Shared` until the app is granted that directory. The grant is `~/Shared/FreeTube` for `io.freetubeapp.FreeTube`, and nothing broader. A native package does not need the grant.
 
@@ -141,11 +147,11 @@ groundwork syncthing-pair add --device-id DEVICE_ID --name NAME --magicdns MAGIC
 `add` is safe to run again with the same arguments. A second run that already matches exits 0 and does not create a second device entry or a second folder share.
 
 1. Require the user service to be running and the GUI to be on `127.0.0.1:8384`. If the service is down, print that platform's start command and exit nonzero. Do not start a second Syncthing process.
-2. On Unix, require `config.xml` to be mode `0600`. On Windows, require an ACL that grants the current user and does not grant Everyone. Otherwise exit nonzero. The config directory is the one this install uses: `$XDG_STATE_HOME/syncthing` or `~/.local/state/syncthing` on Linux, `~/Library/Application Support/Syncthing` on macOS, `%LOCALAPPDATA%\Syncthing` on Windows. If the pre-1.27 path `~/.config/syncthing/config.xml` exists and the new path does not, use the old path.
+2. On Unix, require `config.xml` and `key.pem` to be mode `0600`. On Windows, require the ACL of both `config.xml` and `key.pem` to grant only the current user, `SYSTEM`, and `Administrators`. Any other trustee fails the check. Otherwise exit nonzero. The config directory is the one this install uses: `$XDG_STATE_HOME/syncthing` or `~/.local/state/syncthing` on Linux, `~/Library/Application Support/Syncthing` on macOS, `%LOCALAPPDATA%\Syncthing` on Windows. If the pre-1.27 path `~/.config/syncthing/config.xml` exists and the new path does not, use the old path.
 3. Read the API key from that file in memory. Send it only as the `X-API-Key` header to `http://127.0.0.1:8384`. The key is never an argument, an environment variable, a log line, or a file under a git checkout. `syncthing cli` is acceptable for the same calls when it loads the key itself.
 4. Reject a malformed device ID, and reject this machine's own device ID. `show` is how the other machine's ID is obtained (`syncthing device-id`, `syncthing --device-id`, or `syncthing cli show system`, whichever the installed binary accepts). Print that ID only. Do not write it into a repo, a shell rc, or a world-readable file.
-5. `GET /rest/config/devices/<id>`. When the device is absent, `POST` it with the label, the two MagicDNS addresses, and the two Tailscale prefixes. When it is present and those fields already match, leave it. When they differ, `PUT` the object from the `GET`, changing only those fields, so a re-run converges and unrelated device fields survive.
-6. `GET /rest/config/folders/groundwork-shared`. When it is absent, start from `GET /rest/config/defaults/folder`, set the id, label, and absolute `~/Shared` path, and add this device. When it is present, add this device to its device list without removing any device already there. When the stored path is not absolute `~/Shared`, stop and report it. Do not retarget a folder that was moved.
+5. `GET /rest/config/devices/<id>`. When the device is absent, `GET /rest/config/defaults/device`, set `deviceID`, `name`, `addresses`, and `allowedNetworks` on that object, and `POST` it. When it is present and those fields already match, leave it with no device write. When they differ, `PUT` the object from the device `GET`, changing only those fields, so a re-run converges and unrelated device fields survive.
+6. `GET /rest/config/folders/groundwork-shared`. When the folder is absent, start from `GET /rest/config/defaults/folder`, set the id, label, and absolute `~/Shared` path, and add this device from `GET /rest/config/defaults/device` (its `deviceID` set). When the folder is present and this device ID is already in `folder.devices`, do not write the folder. When the ID is absent, append that defaults/device entry and write the folder once. When the stored path is not absolute `~/Shared`, stop and report it. Do not retarget a folder that was moved.
 7. Exit 0. The success line names the label and says the other machine runs `add` with this machine's device ID. It does not include the API key, the certificate, or `key.pem`.
 
 Both directions are required. Adding machine B on machine A shows B a pending device until B adds A. After both adds, the folder is shared in both directions and the files converge. Repeat `show` and `add` for each pair. The mini is the useful first peer, because it is the one that stays on.
@@ -161,4 +167,4 @@ Package installation, the service manager, the Flatpak grant, and the Windows sy
 | `groundwork-windows` | Winget `Syncthing.Syncthing`, on the Windows host. Per-user logon start with `--no-console --no-browser` and `STNODEFAULTFOLDER=1`. | Winget `FreeTube.FreeTube`. Data directory `%APPDATA%\FreeTube`. `PrestonN.FreeTube` is the old publisher id and stops at 0.23.14. Creating the file symlinks needs a user who is allowed to create symlinks; if that permission is missing, set the step aside and retry, and do not mark it finished. |
 | `groundwork-omarchy-mac-arm64` | Pacman `syncthing` via `omarchy pkg add syncthing` (Arch Linux ARM `extra`, aarch64), then `systemctl --user enable --now syncthing.service`. Enable linger on the mini. Confirm this package runs on the mini's 16 KiB pages before treating the install as finished. | The FreeTube package is chosen in that repo. Flatpak `io.freetubeapp.FreeTube` uses `~/.var/app/io.freetubeapp.FreeTube/config/FreeTube/` and the same narrow filesystem grant. A native `freetube-bin` install uses `~/.config/FreeTube`. Use the path that matches the package that actually launches. |
 
-Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, the symlink repair, and the one-machine warning on the FreeTube cheatsheet or app list. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
+Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, the FreeTube launch path that pauses `groundwork-shared` across the post-close compact, and the one-machine warning on the FreeTube cheatsheet or app list. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
