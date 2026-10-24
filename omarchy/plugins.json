@@ -1,0 +1,80 @@
+{
+    "schemaVersion": 1,
+    "plugins": [
+        {
+            "id": "io.github.mb-jambon.omapods",
+            "repo": "https://github.com/MB-JAMBON/omarchy-pods.git",
+            "reason": "Shows AirPods battery and listening modes. The plugin setup builds its daemon and needs administrator permission.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ],
+            "setup": {
+                "command": "setup",
+                "needsSudo": true
+            }
+        },
+        {
+            "id": "io.github.wouldja.mouse",
+            "repo": "https://github.com/wouldja/omarchy-mouse.git",
+            "reason": "Visual pointer and trackpad controls, including touchpads. It writes ~/.config/hypr/mouse.lua, which loads after input.lua.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "jankeesvw.notification-center",
+            "repo": "https://github.com/jankeesvw/omarchy-notification-center.git",
+            "reason": "Keeps notification history for 30 days. Omarchy keeps the last 10.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "io.github.twiking.omacontrol",
+            "repo": "https://github.com/twiking/omacontrol.git",
+            "reason": "An all-in-one settings window. The OmaSettings README says that plugin continues as OmaControl.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "io.github.juancasanueva.plugin-manager",
+            "repo": "https://github.com/juancasanueva/omarchy-plugin-manager.git",
+            "reason": "The single plugin manager. Its installs and updates are pinned to verified commits, it has a marketplace browser, and it is more active than omaplug.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "davedes.netspeed",
+            "repo": "https://github.com/Davedes83/omarchy-netspeed-plugin.git",
+            "reason": "Live network speed.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "crmne.mpris",
+            "repo": "https://github.com/crmne/omarchy-mpris.git",
+            "reason": "Media controls with album art. The built-in media widget is absent from the default bar.",
+            "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        }
+    ],
+    "retired": []
+}
