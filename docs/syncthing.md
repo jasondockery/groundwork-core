@@ -40,7 +40,7 @@ One folder:
 
 The first launch of an unconfigured Syncthing creates a folder at `~/Sync`. Groundwork's folder is `~/Shared`, so the service environment sets `STNODEFAULTFOLDER=1` before `syncthing generate` and before the service starts. An existing `~/Sync` that a person already uses is left in place. The apply does not delete it.
 
-Folder versioning, rescan interval, ignore patterns, and the other folder fields stay at Syncthing's defaults. The apply fills id, label, path, and type from the table, then leaves the rest of the default folder object alone.
+Folder versioning and rescan interval stay at Syncthing's defaults. The shared folder ignore list includes the pattern `*~`, so a crash temp such as `~/Shared/FreeTube/history.db~` is not synced. The apply adds that line to `~/Shared/.stignore` when it is missing and leaves every other ignore line in place. The apply fills id, label, path, and type from the table, then leaves the rest of the default folder object alone.
 
 ## What the apply changes
 
@@ -90,7 +90,7 @@ Each row is a setting whose upstream default would leave the tailnet. The value 
 
 ### GUI address
 
-A later apply writes `gui.address` back to `127.0.0.1:8384` when it differs. The GUI and the REST API share one listen address. `127.0.0.1:8384` is the upstream localhost value. `0.0.0.0` would also listen on the LAN, and that API can read and write every synced file. The Tailscale address alone would drop the local browser. Remote use is the SSH forward above.
+A later apply writes `gui.address` back to `127.0.0.1:8384` when it differs. That write is `PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`. A `PUT` clears the password. The GUI and the REST API share one listen address. `127.0.0.1:8384` is the upstream localhost value. `0.0.0.0` would also listen on the LAN, and that API can read and write every synced file. The Tailscale address alone would drop the local browser. Remote use is the SSH forward above.
 
 A later apply leaves `gui.user`, `gui.password`, `options.urAccepted`, `options.crashReportingEnabled`, and folder versioning at the values already stored. Those are the person's choices. Groundwork does not write them on a later apply.
 
@@ -105,33 +105,31 @@ FreeTube's package data directory stays where that package puts it. Groundwork s
 - `profiles.db`
 - `settings.db`
 
-The files live in `~/Shared/FreeTube/`. Each name in the package data directory is a symlink to the matching file. The rest of the data directory (cache, cookies, session storage, lock files, `search-history.db`, `subscription-cache.db`) stays local. Sharing the whole data directory would copy Electron files between operating systems, which FreeTube's maintainer has said is unsafe. FreeTube 0.25.3 has no supported data-directory setting. Chromium's `--user-data-dir`, and any portable-mode flag, is an unsupported launch flag that has to be passed every time. The symlink plus the session pause below is the mechanism that survives FreeTube's own compact.
+The files live in `~/Shared/FreeTube/`. Each name in the package data directory is a symlink to the matching file. The rest of the data directory (cache, cookies, session storage, lock files, `search-history.db`, `subscription-cache.db`) stays local. Sharing the whole data directory would copy Electron files between operating systems, which FreeTube's maintainer has said is unsafe. FreeTube 0.25.3 has no supported data-directory setting. Chromium's `--user-data-dir`, and any portable-mode flag, is an unsupported launch flag that has to be passed every time. FreeTube 0.25.3 `src/datastores/index.js` checks `statSync(path)?.isSymbolicLink` without calling `isSymbolicLink`. The check is truthy for an existing path, and NeDB receives `realpathSync(path)`. `@seald-io/nedb` 4.1.2 `lib/storage.js` writes `filename~` beside that real path and renames it onto `~/Shared/FreeTube/<name>`. The data-dir symlink survives. The shared file is the compacted database. The wrapper does not move a data-dir file onto a shared file that is already present. On a new machine the data-dir name is absent, FreeTube would create a fresh database, and that move would overwrite the copy Syncthing already delivered.
 
-Classify every data-dir path with a stat that does not follow links. FreeTube's own check uses `statSync().isSymbolicLink`. That call follows the link, reports a regular file, and so misses the symlink it is about to replace.
+Classify each data-dir path with `lstat` before launch, while FreeTube is not running:
 
-While FreeTube is not running, the first link is:
+- The data-dir name is a symlink to `~/Shared/FreeTube/<name>`. Leave it.
+- The data-dir name is absent and the shared file is present. Create the symlink. Do not start FreeTube until that symlink exists.
+- The data-dir name is a regular file and the shared file is absent. Move the regular file to `~/Shared/FreeTube/<name>`, then put the symlink in its place.
+- Both paths are regular files. Stop, print both paths, delete nothing, and do not launch.
+- Both the data-dir name and the shared file are absent. Launch. FreeTube creates the database in its data directory. The next launch finds a regular data-dir file and an absent shared file, and moves, then symlinks.
 
-1. If the data-dir name is already a symlink to `~/Shared/FreeTube/<name>`, leave it.
-2. If the data-dir name is a regular file and the shared file is absent, move the regular file to `~/Shared/FreeTube/<name>` and replace it with the symlink.
-3. If both sides are already regular files before the session, stop and report both paths. The apply does not pick a winner and does not delete either copy.
+After the process exits, leave a correct symlink alone.
 
-FreeTube 0.25.3 compacts each NeDB file when the last window closes. It writes `filename~` beside the database and renames that temporary over the database path. The rename replaces the symlink with the compacted file, and `~/Shared/FreeTube/<name>` still holds the pre-compact copy. A repair that only compares the two regular files then stops, which is the wrong outcome for a compact that just finished.
+Desktop entries, the Dock, the Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` otherwise start the package binary and skip this wrapper. The environment repo installs the wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. A direct binary launch is outside this contract.
 
-The environment's FreeTube launch path owns that window:
+The wrapper takes an exclusive non-blocking lock and holds it from the pause through the resume. FreeTube's single-instance lock in `src/main/index.js` makes a second launch exit immediately after focusing the running instance. When the wrapper lock is busy, launch FreeTube and do not `PATCH` the folder. A second launch must not resume the folder. Only the lock holder resumes, after its process exits and no FreeTube process remains.
 
-1. Before the process starts, run the three checks above. When both sides are already regular files, stop and report, and do not launch.
-2. Pause folder `groundwork-shared` (`PATCH /rest/config/folders/groundwork-shared` with `paused` true) before launch. The pause lasts for the whole process, including the post-close compact, so Syncthing is not reading the file during the rename.
-3. Wait until the FreeTube process exits. Compact runs during that shutdown. Closing the window is not the signal; process exit is.
-4. After the process exits, if the data-dir path is a regular file, move it onto `~/Shared/FreeTube/<name>`. That file is the compacted successor. Recreate the symlink. A path that is still the correct symlink stays as it is. A leftover `filename~` in the data directory is not one of the four shared names and is not moved into `~/Shared`.
-5. Resume the folder (`paused` false) after the symlink is back.
+The lock holder pauses folder `groundwork-shared` with `PATCH /rest/config/folders/groundwork-shared` and `paused` true before launch. The pause stays through the post-close compact, while NeDB renames `~/Shared/FreeTube/*.db~` onto the shared database. Do not resume while a `~/Shared/FreeTube/*.db~` file exists. Cleanup of that temporary never deletes the main database (`history.db`, `playlists.db`, `profiles.db`, or `settings.db`). When the data-dir symlink is still correct and no `*.db~` remains, the lock holder sets `paused` false.
 
-A second launch with the symlink already in place pauses, waits, adopts a new compacted file if the rename happened again, and resumes. If the launch path is interrupted after compact and before the move, the folder stays paused. The next apply, with FreeTube not running, still sees two regular files that were not classified before a session it watched, so it stops and reports and leaves the folder paused until the person picks a copy. When FreeTube is not running and every data-dir name is the correct symlink, the apply resumes the folder.
+When FreeTube is not running, every data-dir name is the correct symlink, and no `*.db~` file exists, a later apply resumes the folder. When a `*.db~` file exists, the folder stays paused.
 
 A Flatpak build cannot see `~/Shared` until the app is granted that directory. The grant is `~/Shared/FreeTube` for `io.freetubeapp.FreeTube`, and nothing broader. A native package does not need the grant.
 
 Open FreeTube on one machine at a time. Close it and wait until Syncthing reports `groundwork-shared` up to date before opening it elsewhere. Two writers append to the same NeDB files and leave `*.sync-conflict-*` copies that FreeTube will not merge. An environment repo may show that warning at launch. The check is local: `GET /rest/db/status` for folder `groundwork-shared`, and a warning when the folder is not idle. The warning does not refuse to start FreeTube. An offline peer would otherwise block the machine that is in use.
 
-If a conflict copy appears, close FreeTube on every machine, keep the newer database, remove the conflict file, and open one machine. There is no merge step.
+If a `*.sync-conflict-*` copy appears, close FreeTube on every machine, print both paths, and stop. Recovery does not choose the newer file by mtime. A fresh empty database is newer than the synced one. Remove a `*.sync-conflict-*` file only after a person compares the copies.
 
 ## Pairing
 
@@ -151,7 +149,7 @@ groundwork syncthing-pair add --device-id DEVICE_ID --name NAME --magicdns MAGIC
 3. Read the API key from that file in memory. Send it only as the `X-API-Key` header to `http://127.0.0.1:8384`. The key is never an argument, an environment variable, a log line, or a file under a git checkout. `syncthing cli` is acceptable for the same calls when it loads the key itself.
 4. Reject a malformed device ID, and reject this machine's own device ID. `show` is how the other machine's ID is obtained (`syncthing device-id`, `syncthing --device-id`, or `syncthing cli show system`, whichever the installed binary accepts). Print that ID only. Do not write it into a repo, a shell rc, or a world-readable file.
 5. `GET /rest/config/devices/<id>`. When the device is absent, `GET /rest/config/defaults/device`, set `deviceID`, `name`, `addresses`, and `allowedNetworks` on that object, and `POST` it. When it is present and those fields already match, leave it with no device write. When they differ, `PUT` the object from the device `GET`, changing only those fields, so a re-run converges and unrelated device fields survive.
-6. `GET /rest/config/folders/groundwork-shared`. When the folder is absent, start from `GET /rest/config/defaults/folder`, set the id, label, and absolute `~/Shared` path, and add this device from `GET /rest/config/defaults/device` (its `deviceID` set). When the folder is present and this device ID is already in `folder.devices`, do not write the folder. When the ID is absent, append that defaults/device entry and write the folder once. When the stored path is not absolute `~/Shared`, stop and report it. Do not retarget a folder that was moved.
+6. `GET /rest/config/folders/groundwork-shared`. When the folder is absent, start from `GET /rest/config/defaults/folder`, set the id, label, and absolute `~/Shared` path, and add this device from `GET /rest/config/defaults/device` (its `deviceID` set). When the folder is present, compare its path with the user's absolute `~/Shared` before any write decision. When the stored path is not that absolute path, stop and report it. Do not write the folder and do not retarget a folder that was moved. When the path matches and this device ID is already in `folder.devices`, do not write the folder. When the path matches and the ID is absent, append that defaults/device entry and write the folder once.
 7. Exit 0. The success line names the label and says the other machine runs `add` with this machine's device ID. It does not include the API key, the certificate, or `key.pem`.
 
 Both directions are required. Adding machine B on machine A shows B a pending device until B adds A. After both adds, the folder is shared in both directions and the files converge. Repeat `show` and `add` for each pair. The mini is the useful first peer, because it is the one that stays on.
@@ -167,4 +165,4 @@ Package installation, the service manager, the Flatpak grant, and the Windows sy
 | `groundwork-windows` | Winget `Syncthing.Syncthing`, on the Windows host. Per-user logon start with `--no-console --no-browser` and `STNODEFAULTFOLDER=1`. | Winget `FreeTube.FreeTube`. Data directory `%APPDATA%\FreeTube`. `PrestonN.FreeTube` is the old publisher id and stops at 0.23.14. Creating the file symlinks needs a user who is allowed to create symlinks; if that permission is missing, set the step aside and retry, and do not mark it finished. |
 | `groundwork-omarchy-mac-arm64` | Pacman `syncthing` via `omarchy pkg add syncthing` (Arch Linux ARM `extra`, aarch64), then `systemctl --user enable --now syncthing.service`. Enable linger on the mini. Confirm this package runs on the mini's 16 KiB pages before treating the install as finished. | The FreeTube package is chosen in that repo. Flatpak `io.freetubeapp.FreeTube` uses `~/.var/app/io.freetubeapp.FreeTube/config/FreeTube/` and the same narrow filesystem grant. A native `freetube-bin` install uses `~/.config/FreeTube`. Use the path that matches the package that actually launches. |
 
-Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, the FreeTube launch path that pauses `groundwork-shared` across the post-close compact, and the one-machine warning on the FreeTube cheatsheet or app list. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
+Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, and the FreeTube wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. The wrapper holds the exclusive lock from the pause of `groundwork-shared` through the resume. A direct binary launch is outside this contract. Each repo shows the one-machine warning on the FreeTube cheatsheet or app list. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
