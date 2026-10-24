@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "plugins": [
         {
             "id": "io.github.mb-jambon.omapods",
@@ -60,6 +60,36 @@
             "repo": "https://github.com/crmne/omarchy-mpris.git",
             "reason": "Media controls with album art. The built-in media widget is absent from the default bar.",
             "batch": 1,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "omarchy.agents",
+            "builtIn": true,
+            "reason": "Tracks Claude, Codex, and Grok usage limits.",
+            "batch": 2,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "tornikegomareli.spaces",
+            "repo": "https://github.com/tornikegomareli/omarchy-spaces.git",
+            "reason": "Shows the apps open on each workspace and replaces the stock Workspaces bar widget.",
+            "batch": 2,
+            "arch": [
+                "aarch64",
+                "x86_64"
+            ]
+        },
+        {
+            "id": "harshith.system-monitor",
+            "repo": "https://github.com/Harshith292002/omarchy-system-monitor.git",
+            "reason": "Shows system load with Apple Silicon sensors and power draw, read from /proc and /sys without a daemon.",
+            "batch": 2,
             "arch": [
                 "aarch64",
                 "x86_64"
