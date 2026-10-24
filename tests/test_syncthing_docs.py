@@ -188,10 +188,11 @@ class SyncthingDocsTest(unittest.TestCase):
             "Remove a `*.sync-conflict-*` file only after a person compares the copies.",
             "only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube`",
             "A direct binary launch is outside this contract.",
-            "Do not resume while a `~/Shared/FreeTube/*.db~` file exists.",
             "pattern `*~`",
             "never deletes the main database",
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
+            "delete only the sibling `name.db~`",
+            "leave the temp so NeDB can rename it back",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
@@ -202,6 +203,48 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertIn("classifies each data-dir name with `lstat`", decision)
         self.assertNotIn("replaces the symlink", decision)
         self.assertNotIn("moves the compacted file back", decision)
+        self.assertIn("The cheatsheet says Quit, not close the window.", decision)
+
+    def test_kernel_lock_quit_and_gui_socket(self) -> None:
+        text = DEFINITION.read_text()
+        for phrase in (
+            "before any `lstat`, move, link, or `PATCH`",
+            "holds it in the process that waits",
+            "Do not `exec` FreeTube over that process.",
+            "`flock(LOCK_EX|LOCK_NB)` on a descriptor kept open until resume",
+            "`LockFileEx` with `LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY`",
+            "on a handle kept open for the same span",
+            "Busy means a live holder",
+            "When the kernel has released the lock, the next launch is the holder and must pause.",
+            "closing the window does not quit",
+            "`open -W`",
+            "`start /wait`",
+            "The FreeTube cheatsheet says Quit, not close the window.",
+            "waits for the FreeTube process to exit, not for the window",
+            "not for `open` or `start` to return",
+            "Resume stays tied to process exit.",
+            "Still holding the lock, after the process is gone",
+            "move that file into `~/Shared/FreeTube`, symlink it, then resume",
+            "If the shared file is already there, stop and print both paths.",
+            "Do not resume while any of the four names is still a regular file.",
+            "When no FreeTube process exists and the main database exists, delete only the sibling `name.db~`, then resume.",
+            "If the main file is absent and only the temp exists, leave the temp",
+            "The apply takes the same non-blocking lock",
+            "If it is busy, do not resume, move, or relink.",
+            'body `{"paused": false}` only',
+            "re-check that no FreeTube process exists",
+            "Do not `PUT` a default folder object over a paused folder.",
+            "Any other `lstat` result: print the paths, change nothing, and do not launch.",
+            "The service must not set `STGUIADDRESS` or `--gui-address`.",
+            "The step is finished only when the GUI socket is `127.0.0.1:8384`",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        self.assertNotIn("Close it and wait", text)
+        self.assertLess(
+            text.index("exclusive non-blocking lock"),
+            text.index("Classify each data-dir path with `lstat`"),
+        )
 
     def test_lead_keeps_credentials_out_of_the_share(self) -> None:
         paragraphs = [part.strip() for part in DEFINITION.read_text().split("\n\n") if part.strip()]
