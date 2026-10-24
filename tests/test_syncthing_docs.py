@@ -45,6 +45,11 @@ _REMOVED_UNSAFE_RULES = (
     "delete only the sibling `name.db~`",
     "The same-directory rename runs only when",
     "move and symlink every regular file whose shared path is absent, then stop",
+    "A first session is allowed only when this device is the folder's only member",
+    "only when this device is the folder's only member",
+    "POST /rest/db/override",
+    "availability is non-empty",
+    "An absent shared file is never a first session or a migration",
 )
 
 
@@ -213,14 +218,24 @@ class SyncthingDocsTest(unittest.TestCase):
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
             "The FreeTube wrapper never pauses `groundwork-shared`.",
             "Pause and resume only `groundwork-freetube`.",
-            "When the folder is shared with any other device, FreeTube launches only once the four files are already present locally",
-            "An absent shared file is never a first session or a migration: create nothing, move nothing, resume nothing, and do not launch.",
+            "The cluster has no copy of a name when the folder is unpaused",
+            "the person's confirmation",
+            "Do not publish a local file while a live copy exists.",
+            "global.deleted` false and `global.invalid` false",
+            "Do not decide peer presence from `availability`.",
             "GET /rest/db/file",
             "receive-only",
-            "A first session is allowed only when this device is the folder's only member",
+            "POST /rest/db/revert",
+            "GET /rest/db/localchanged?folder=groundwork-freetube",
+            "move those files aside, revert, and move them back",
+            "Stay `receiveonly` and unpaused until `local.deleted` is false and the path is a regular file.",
             "Never promote `name.db~` when a main file exists.",
             "quarantine the temp and migrate the main only",
-            "Offer deletion confirmation only after an in-sync scan shows the file absent on every peer.",
+            "Offer deletion confirmation only when `global.deleted` is true and every other device in `folder.devices` has connected since that deletion.",
+            "a live copy may still be in `.stversions` on a peer",
+            "`/FreeTube` as the first pattern",
+            "before either folder is added and before the first scan",
+            "Do not announce those entries as deletions.",
             "A file on disk, including a 0-byte file, is a present shared file.",
             "Resume only when every name is either a present shared file or a deletion the person confirmed for that specific name.",
             "Printing the path, running apply, or confirming one name does not confirm the others.",
@@ -232,7 +247,7 @@ class SyncthingDocsTest(unittest.TestCase):
             "A symlink is not a main.",
             "Print the missing path and stop rather than reclassifying in a loop.",
             "One pass classifies all four names, then one folder decision.",
-            "Launch only when every name is already present locally",
+            "Launch when every name is already present locally, or when the person confirmed the one create path",
             "If the shared file is already there, stop and print both paths.",
             "versioning.type` `trashcan`",
             "cleanoutDays` `0`",
@@ -246,13 +261,13 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("keep the newer", text)
         self.assertLess(text.index("compare its path"), text.index("already in `folder.devices`"))
         self.assertLess(
-            text.index("When the folder is shared with any other device"),
-            text.index("A first session is allowed only when this device is the folder's only member"),
+            text.index("before either folder is added and before the first scan"),
+            text.index("Enable and start the user service."),
         )
         self.assertIn("The data-dir symlink survives", decision)
         self.assertIn("classifies each data-dir name with `lstat`", decision)
-        self.assertIn("an absent file is not a first session and not a migration", decision)
-        self.assertIn("only when this device is the folder's only member", decision)
+        self.assertIn("while `global` has a live copy", decision)
+        self.assertIn("when the cluster has no copy", decision)
         self.assertNotIn("replaces the symlink", decision)
         self.assertNotIn("moves the compacted file back", decision)
         self.assertIn("The cheatsheet says Quit, not close the window.", decision)
@@ -300,7 +315,9 @@ class SyncthingDocsTest(unittest.TestCase):
             "does not rewrite `config.xml`",
             "The step stays unfinished until the override is unset and the listening socket is `127.0.0.1:8384`",
             "A later apply uses the same per-name rule.",
-            "POST /rest/db/override",
+            "POST /rest/db/revert",
+            "POST /rest/system/reset?folder=groundwork-shared",
+            "Do not announce those entries as deletions.",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
