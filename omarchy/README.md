@@ -38,11 +38,19 @@ Each plugin is batch 1 and is installed on `aarch64` and `x86_64`.
 | --- | --- |
 | `io.github.mb-jambon.omapods` | Shows AirPods battery and listening modes. Its `setup` builds the daemon. That command installs system packages with `omarchy pkg add`, so `needsSudo` is true. |
 | `io.github.wouldja.mouse` | Visual pointer and trackpad controls, including touchpads. It writes `~/.config/hypr/mouse.lua`, which loads after `input.lua`. |
-| `jankeesvw.notification-center` | Keeps notification history for 30 days. Omarchy keeps the last 10. |
 | `io.github.twiking.omacontrol` | An all-in-one settings window. The OmaSettings README says that plugin continues as OmaControl. |
 | `io.github.juancasanueva.plugin-manager` | The single plugin manager. Its installs and updates are pinned to verified commits, it has a marketplace browser, and it is more active than omaplug. |
 | `davedes.netspeed` | Live network speed. |
 | `crmne.mpris` | Media controls with album art. The built-in media widget is absent from the default bar. |
+
+## Deferred
+
+Requested for batch 1 and held back. `retired` is for plugins this list
+previously installed, so a held-back plugin is recorded here.
+
+| Id | Reason |
+| --- | --- |
+| `jankeesvw.notification-center` | Requested for batch 1. Held back until its watcher reads the shell's `live.json` and `history.json`. |
 
 ## Left out
 
