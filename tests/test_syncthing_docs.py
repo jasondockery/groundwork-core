@@ -192,7 +192,10 @@ class SyncthingDocsTest(unittest.TestCase):
             "never deletes the main database",
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
             "delete only the sibling `name.db~`",
-            "If the shared file is absent, do not launch.",
+            "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent: do not launch.",
+            "rename it onto the target under the lock, then classify again",
+            "This migration path still launches",
+            "This first-session path still launches",
             "rename the temp onto `name.db` while holding the lock",
             "Delete `name.db~` only when the main file was already there.",
             "If the lock is busy and no FreeTube process exists, exit without launching.",
@@ -237,7 +240,10 @@ class SyncthingDocsTest(unittest.TestCase):
             "When no FreeTube process exists and the main database exists, delete only the sibling `name.db~`, then resume.",
             "Delete `name.db~` only when the main file was already there.",
             "rename the temp onto `name.db` while holding the lock",
-            "If the shared file is absent, do not launch.",
+            "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent: do not launch.",
+            "rename it onto the target under the lock, then classify again",
+            "This migration path still launches",
+            "This first-session path still launches",
             "The apply takes the same non-blocking lock",
             "If it is busy, do not resume, move, or relink.",
             'body `{"paused": false}` only',
@@ -252,6 +258,7 @@ class SyncthingDocsTest(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
         self.assertNotIn("Close it and wait", text)
+        self.assertNotIn("If the shared file is absent, do not launch.", text)
         self.assertNotIn("replaces the address in config", text)
         self.assertNotIn("leave the temp so NeDB can rename it back", text)
         self.assertLess(
