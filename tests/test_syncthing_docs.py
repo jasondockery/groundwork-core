@@ -183,6 +183,16 @@ class SyncthingDocsTest(unittest.TestCase):
                 with self.subTest(path=path.name, marker=marker):
                     self.assertNotIn(marker, text)
 
+    def test_desktop_checks_stay_out_of_the_syncthing_grant(self) -> None:
+        text = (ROOT / "docs" / "tailscale.md").read_text()
+        shared_at = text.index("## Shared folders")
+        shared = text[shared_at:]
+        self.assertLess(text.index("keyboard/mouse"), shared_at)
+        self.assertNotIn("keyboard/mouse", shared)
+        self.assertIn("tcp:22000", shared)
+        self.assertIn("udp:22000", shared)
+        self.assertIn("Leave TCP 8384 out", shared)
+
     def test_relative_links_resolve(self) -> None:
         pages = [
             DECISION,
