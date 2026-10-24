@@ -193,10 +193,14 @@ class SyncthingDocsTest(unittest.TestCase):
             'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
             "delete only the sibling `name.db~`",
             "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent: do not launch.",
-            "rename it onto the target under the lock, then classify again",
+            "Print the paths and stop rather than reclassifying in a loop.",
+            "Before the case list, under the lock, with no FreeTube process, run temp-normalization.",
+            "wherever its main file lives (data dir or share)",
+            "rename that temp onto its sibling database while holding the lock",
+            "A local regular database beside its sibling `name.db~`",
+            "A sole `name.db~` in the data directory",
             "This migration path still launches",
             "This first-session path still launches",
-            "rename the temp onto `name.db` while holding the lock",
             "Delete `name.db~` only when the main file was already there.",
             "If the lock is busy and no FreeTube process exists, exit without launching.",
             "Only the holder launches, and only after the pause.",
@@ -237,11 +241,12 @@ class SyncthingDocsTest(unittest.TestCase):
             "move that file into `~/Shared/FreeTube`, symlink it, then resume",
             "If the shared file is already there, stop and print both paths.",
             "Do not resume while any of the four names is still a regular file.",
-            "When no FreeTube process exists and the main database exists, delete only the sibling `name.db~`, then resume.",
             "Delete `name.db~` only when the main file was already there.",
-            "rename the temp onto `name.db` while holding the lock",
+            "rename that temp onto its sibling database while holding the lock",
             "The data-dir name is a symlink to `~/Shared/FreeTube/<name>` and that target is absent: do not launch.",
-            "rename it onto the target under the lock, then classify again",
+            "Print the paths and stop rather than reclassifying in a loop.",
+            "A local regular database beside its sibling `name.db~`",
+            "A sole `name.db~` in the data directory",
             "This migration path still launches",
             "This first-session path still launches",
             "The apply takes the same non-blocking lock",
@@ -261,8 +266,13 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("If the shared file is absent, do not launch.", text)
         self.assertNotIn("replaces the address in config", text)
         self.assertNotIn("leave the temp so NeDB can rename it back", text)
+        self.assertNotIn("then classify again", text)
         self.assertLess(
             text.index("exclusive non-blocking lock"),
+            text.index("Classify each data-dir path with `lstat`"),
+        )
+        self.assertLess(
+            text.index("run temp-normalization"),
             text.index("Classify each data-dir path with `lstat`"),
         )
 
