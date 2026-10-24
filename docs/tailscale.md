@@ -103,6 +103,22 @@ The service must also be installed, running, authenticated, and allowed by the h
 
 Verify viewing and keyboard/mouse control from a second device, then repeat after reboot and desktop login. Desktop startup does not bypass disk encryption, OS privacy consent, the lock screen, or sleep/power limitations. Use terminal access separately for recovery. Passwords, certificates, tailnet policy, and machine addresses stay local, outside Git.
 
+## Shared folders
+
+[Syncthing shared folders](syncthing.md) is the file-sharing default. Folder layout, the user service, and device pairing live there. The tailnet grant those peers need is recorded here.
+
+Syncthing's sync listener binds to localhost and that machine's current Tailscale addresses, on TCP 22000 and UDP 22000. Reconcile this grant into the private policy beside the SSH grant:
+
+```json
+{
+  "src": ["autogroup:member"],
+  "dst": ["autogroup:self"],
+  "ip": ["tcp:22000", "udp:22000"]
+}
+```
+
+This is one grant object, not a replacement policy. Your own approved devices should reach TCP 22000 and UDP 22000 on each other. Other users should not. Leave TCP 8384 out of the tailnet grants: the GUI stays on `127.0.0.1:8384`, and from another machine you forward that loopback port over SSH as [the shared-folder page](syncthing.md) describes. Device IDs and API keys stay on the machine, outside Git.
+
 ## Keep it working
 
 - Use each environment's supported updater for its Tailscale client; desktop apps and OS packages have different update owners. Review security updates promptly.

@@ -37,6 +37,7 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 - `skel/`, project scaffolds
 - [`docs/ai-tools-and-remote-access.md`](docs/ai-tools-and-remote-access.md), shared T3 Code, Herdr, and Tailscale guidance
 - [`docs/tailscale.md`](docs/tailscale.md), the common tailnet security and connection guide referenced by each environment
+- [`docs/syncthing.md`](docs/syncthing.md), the shared-folder default (Syncthing over the tailnet, `~/Shared`, FreeTube's database files) and [`docs/decisions/syncthing-shared-folders.md`](docs/decisions/syncthing-shared-folders.md), the decision record
 - [`docs/migrating-from-groundwork.md`](docs/migrating-from-groundwork.md), migration for existing macOS, Linux, and Windows/WSL2 users while the old repo remains available
 
 ## What stays in an environment repo
