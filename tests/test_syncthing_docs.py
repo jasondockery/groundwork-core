@@ -163,21 +163,45 @@ class SyncthingDocsTest(unittest.TestCase):
         )
         self.assertNotIn("puts the upstream value back", text)
 
-    def test_freetube_compact_replaces_the_symlink(self) -> None:
+    def test_freetube_lstat_lock_and_conflict(self) -> None:
         text = DEFINITION.read_text()
+        decision = DECISION.read_text()
         for phrase in (
-            "statSync().isSymbolicLink",
+            "statSync(path)?.isSymbolicLink",
+            "without calling `isSymbolicLink`",
+            "realpathSync(path)",
             "filename~",
-            "`paused` true",
-            "including the post-close compact",
-            "FreeTube process exits",
-            "compacted successor",
-            "Recreate the symlink",
-            "`paused` false",
-            "already regular files before the session",
+            "The data-dir symlink survives",
+            "does not move a data-dir file onto a shared file that is already present",
+            "Classify each data-dir path with `lstat`",
+            "Leave it.",
+            "The data-dir name is absent and the shared file is present.",
+            "Do not start FreeTube until that symlink exists.",
+            "The data-dir name is a regular file and the shared file is absent.",
+            "Both paths are regular files. Stop, print both paths, delete nothing, and do not launch.",
+            "leave a correct symlink alone",
+            "exclusive non-blocking lock",
+            "do not `PATCH` the folder",
+            "A second launch must not resume the folder.",
+            "Only the lock holder resumes, after its process exits and no FreeTube process remains.",
+            "does not choose the newer file by mtime",
+            "Remove a `*.sync-conflict-*` file only after a person compares the copies.",
+            "only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube`",
+            "A direct binary launch is outside this contract.",
+            "Do not resume while a `~/Shared/FreeTube/*.db~` file exists.",
+            "pattern `*~`",
+            "never deletes the main database",
+            'PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`',
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
+        self.assertNotIn("compacted successor", text)
+        self.assertNotIn("keep the newer", text)
+        self.assertLess(text.index("compare its path"), text.index("already in `folder.devices`"))
+        self.assertIn("The data-dir symlink survives", decision)
+        self.assertIn("classifies each data-dir name with `lstat`", decision)
+        self.assertNotIn("replaces the symlink", decision)
+        self.assertNotIn("moves the compacted file back", decision)
 
     def test_lead_keeps_credentials_out_of_the_share(self) -> None:
         paragraphs = [part.strip() for part in DEFINITION.read_text().split("\n\n") if part.strip()]
