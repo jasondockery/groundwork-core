@@ -9,6 +9,7 @@ Read `README.md` and `AI_THESIS.md` before changing the shared pages.
 - Environment repos pin this repo as a `core` submodule. Do not copy these pages into `groundwork-mac` or `groundwork-omarchy-mac-arm64` as a second source.
 - Shell keys, tmux keys, package installs, desktops, and account material belong in the environment repo.
 - Do not add Homebrew, chezmoi source, Hyprland config, SSH keys, account emails, or org remotes here.
+- `omarchy/` may hold data-only manifests consumed by environment repos. It must not hold installers or Hyprland config.
 - Do not tell an Omarchy machine to run `chezmoi apply` or `bootstrap-mac.sh`.
 - The original Groundwork repo stays where it is. These family repos are the split.
 - Keep the original `groundwork` repo unchanged; it is curriculum and historical context for this task. Omarchy's conventions are the target where they fit, not the older Groundwork keymap.
@@ -24,4 +25,5 @@ Read `README.md` and `AI_THESIS.md` before changing the shared pages.
 | `docs/` | Shared teaching pages. See `docs/README.md`. |
 | `skills/` | Local documentation procedure and imported references; read `skills/README.md` before selecting one. |
 | `skel/` | Project scaffolds a person can copy. |
+| `omarchy/` | Data-only Omarchy plugin manifests. See `omarchy/README.md`. |
 | `AI_THESIS.md` | North star. Environment repos should point here rather than restating it. |
