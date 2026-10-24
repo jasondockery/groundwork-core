@@ -64,8 +64,9 @@ bar already lists it on the right. The applier records that built-in id once,
 leaves Omarchy quattro's default right-side placement alone, and never runs
 `omarchy plugin enable` again after the id is recorded, so a widget someone
 removed stays removed. A bare enable would not restore the right side. The
-agents manifest has no `defaultSection`, so Omarchy would place it in
-`centerEnd`.
+`omarchy.agents` entry in `plugins.json` has no `section`, so the applier does
+not pass `--section`. The agents manifest has no `defaultSection`, so Omarchy
+would place it in `centerEnd`.
 
 `tornikegomareli.spaces` replaces the stock Workspaces bar widget,
 `omarchy.workspaces`. Omarchy's default bar places that widget on the left, in
