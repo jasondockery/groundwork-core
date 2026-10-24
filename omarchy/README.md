@@ -60,8 +60,12 @@ Three plugins. Each is batch 2 and is applied on `aarch64` and `x86_64`.
 | `harshith.system-monitor` | Shows system load with Apple Silicon sensors and power draw, read from `/proc` and `/sys` without a daemon. |
 
 `omarchy.agents` ships with Omarchy in `shell/plugins/agents`. Omarchy's default
-bar already lists it on the right. The applier enables it when the bar omits
-it.
+bar already lists it on the right. The applier records that built-in id once,
+leaves Omarchy quattro's default right-side placement alone, and never runs
+`omarchy plugin enable` again after the id is recorded, so a widget someone
+removed stays removed. A bare enable would not restore the right side. The
+agents manifest has no `defaultSection`, so Omarchy would place it in
+`centerEnd`.
 
 `tornikegomareli.spaces` replaces the stock Workspaces bar widget,
 `omarchy.workspaces`. Omarchy's default bar places that widget on the left, in
