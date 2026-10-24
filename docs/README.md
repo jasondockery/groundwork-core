@@ -1,6 +1,6 @@
 # Shared docs
 
-Current shared operational guidance lives in [AI tools and remote access](ai-tools-and-remote-access.md) and [Tailscale](tailscale.md). Each environment repo adds its own install and OS-specific steps. Keep shared security policy here, referenced rather than copied.
+Current shared operational guidance lives in [AI tools and remote access](ai-tools-and-remote-access.md), [Tailscale](tailscale.md), and [Syncthing shared folders](syncthing.md). The [Syncthing decision](decisions/syncthing-shared-folders.md) records why that default was chosen. Each environment repo adds its own install and OS-specific steps. Keep shared security policy here, referenced rather than copied.
 
 The learning curriculum stays at the original [Groundwork site](https://jasondockery.github.io/groundwork/) for now. The imported HTML pages below are historical reference from the initial split, not the current learner navigation.
 
