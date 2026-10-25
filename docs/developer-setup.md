@@ -8,7 +8,7 @@ Personal and managed machines use the same developer tools. Device policy and su
 | Linux and WSL2 Unix environment | `groundwork-linux` and `groundwork-windows` delegate to the `groundwork-mac` engine for the native coding CLIs and Tailscale package. Desktop Linux also includes Cursor. WSL host apps remain a separate explicit installation. |
 | Windows host | `groundwork-windows` owns explicit native app installation and Windows service guidance. The host normally owns Tailscale connectivity; a WSL package does not enroll another node automatically. |
 | Omarchy on Apple Silicon | `groundwork-omarchy-mac-arm64` preserves Omarchy’s package feed and tool configuration. The shared chezmoi engine is never applied there. Native Linux uses its supported apps and web access for services without official Linux desktop apps. |
-| Shared guidance | This repository owns the explanation, not package installation or account enrollment. |
+| Shared guidance | This repository owns shared explanations, not package installation or account enrollment. See [local model workflows](local-models.md) for evaluation; environment repositories own runtime installation and model downloads. |
 
 Git identity, optional personal apps, C#/infrastructure extensions, container backend, and stable/preview release posture are independent choices. Existing valid preferences are preserved during migration. A stored historical `work` flag is compatibility input, not an ongoing tool exclusion.
 

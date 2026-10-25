@@ -36,6 +36,7 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
   imported reference material; active shared engineering skills belong to Compass
 - `skel/`, project scaffolds
 - [`docs/ai-tools-and-remote-access.md`](docs/ai-tools-and-remote-access.md), shared T3 Code, Herdr, and Tailscale guidance
+- [`docs/local-models.md`](docs/local-models.md), shared evaluation and privacy guidance for optional local models
 - [`docs/tailscale.md`](docs/tailscale.md), the common tailnet security and connection guide referenced by each environment
 - [`docs/migrating-from-groundwork.md`](docs/migrating-from-groundwork.md), migration for existing macOS, Linux, and Windows/WSL2 users while the old repo remains available
 
