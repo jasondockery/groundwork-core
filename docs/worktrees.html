@@ -38,7 +38,7 @@
 <div class="layout">
   <aside id="site-sidebar" class="sidebar">
     <div class="brand-row">
-      <a class="brand" href="index.html">
+      <a class="brand" href="https://jasondockery.github.io/groundwork/index.html">
       <span class="mark">AI-native</span>
       <span class="name">Groundwork</span>
       </a>
@@ -48,42 +48,42 @@
     <nav class="site-nav" aria-label="Documentation">
     <section class="nav-group">
       <h2 class="nav-heading">Start here</h2>
-      <a href="index.html">Overview</a>
+      <a href="https://jasondockery.github.io/groundwork/index.html">Overview</a>
       <a href="why.html">Why Groundwork</a>
       <a href="path.html">The path</a>
       <a href="agentic-engineering.html">Vibe &rarr; agentic</a>
-      <a href="getting-started.html">Getting started</a>
+      <a href="https://jasondockery.github.io/groundwork/getting-started.html">Getting started</a>
       <a href="practice.html">Practice plan</a>
       <a href="groundwork-twelve.html">Groundwork Twelve</a>
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Set up</h2>
-      <a href="setup.html">Setup &amp; chezmoi</a>
-      <a href="platforms.html">Platforms</a>
-      <a href="customizing.html">Customizing</a>
-      <a href="development.html">Development</a>
-      <a href="installed.html">What&apos;s installed</a>
+      <a href="https://jasondockery.github.io/groundwork/setup.html">Setup &amp; chezmoi</a>
+      <a href="https://jasondockery.github.io/groundwork/platforms.html">Platforms</a>
+      <a href="https://jasondockery.github.io/groundwork/customizing.html">Customizing</a>
+      <a href="https://jasondockery.github.io/groundwork/development.html">Development</a>
+      <a href="https://jasondockery.github.io/groundwork/installed.html">What&apos;s installed</a>
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Foundations</h2>
       <a href="command-line.html">Command line &amp; Unix</a>
-      <a href="shell.html">Shell &amp; CLI</a>
-      <a href="herdr.html">Herdr</a>
-      <a href="tmux.html">tmux</a>
-      <a href="tmux-repository-windows.html">tmux repo windows</a>
-      <a href="neovim.html">Neovim</a>
-      <a href="git.html">Git</a>
-      <a href="lazygit.html">lazygit</a>
-      <a href="data.html">Data &amp; storage</a>
+      <a href="https://jasondockery.github.io/groundwork/shell.html">Shell &amp; CLI</a>
+      <a href="https://jasondockery.github.io/groundwork/herdr.html">Herdr</a>
+      <a href="https://jasondockery.github.io/groundwork/tmux.html">tmux</a>
+      <a href="https://jasondockery.github.io/groundwork/tmux-repository-windows.html">tmux repo windows</a>
+      <a href="https://jasondockery.github.io/groundwork/neovim.html">Neovim</a>
+      <a href="https://jasondockery.github.io/groundwork/git.html">Git</a>
+      <a href="https://jasondockery.github.io/groundwork/lazygit.html">lazygit</a>
+      <a href="https://jasondockery.github.io/groundwork/data.html">Data &amp; storage</a>
       <a href="editors-ai.html">Editors &amp; AI</a>
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Daily workflow</h2>
       <a href="workflow.html">Everyday workflow</a>
-      <a href="repo-navigation.html">Repo navigation</a>
+      <a href="https://jasondockery.github.io/groundwork/repo-navigation.html">Repo navigation</a>
       <a href="new-project.html">Starting a project</a>
       <a href="knowledge.html">Knowledge base</a>
-      <a href="dependencies.html">Dependencies</a>
+      <a href="https://jasondockery.github.io/groundwork/dependencies.html">Dependencies</a>
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Directing agents</h2>
@@ -112,17 +112,17 @@
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Mac desktop</h2>
-      <a href="macos.html">macOS desktop</a>
-      <a href="keyboard.html">Keyboard</a>
-      <a href="apps.html">Apps &amp; browsers</a>
+      <a href="https://jasondockery.github.io/groundwork/macos.html">macOS desktop</a>
+      <a href="https://jasondockery.github.io/groundwork/keyboard.html">Keyboard</a>
+      <a href="https://jasondockery.github.io/groundwork/apps.html">Apps &amp; browsers</a>
     </section>
     <section class="nav-group">
       <h2 class="nav-heading">Reference</h2>
-      <a href="cheatsheet.html">Cheat sheet</a>
-      <a href="commands.html">Command catalog</a>
+      <a href="https://jasondockery.github.io/groundwork/cheatsheet.html">Cheat sheet</a>
+      <a href="https://jasondockery.github.io/groundwork/commands.html">Command catalog</a>
       <a href="glossary.html">Glossary</a>
       <a href="resources.html">Resource library</a>
-      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="https://jasondockery.github.io/groundwork/troubleshooting.html">Troubleshooting</a>
     </section>
     </nav>
     <button class="icon-btn theme-toggle" data-theme-toggle><span data-theme-label>◑ Latte</span></button>
@@ -189,7 +189,7 @@
         <p>This matters more with agents than without: you often create the worktree from wherever your shell already was, and nothing in the agent's context can reveal a wrong starting point. State the base every time.</p>
         <p>The same applies to cleanup. <code>git branch -d</code> refuses when your <em>local</em> base branch hasn't yet observed the merge — the work is safely on the remote, but your clone doesn't know. Fetch first; if you then still need <code>-D</code>, confirm the commits really landed before forcing it.</p>
       </div>
-      <p>For persistent agent work, use <code>&lt;configured-root&gt;/.worktrees/&lt;unique-repo-slug&gt;/&lt;lane&gt;</code>. With Groundwork's default repository root, one example is <code>~/code/.worktrees/example-myrepo/fix-auth</code>. The repository slug should be stable and unique — use <code>owner-project</code> or another unambiguous name when common basenames such as <code>api</code>, <code>docs</code>, or <code>web</code> could collide. The path stays outside the main checkout, survives reboots, remains within <a href="repo-navigation.html"><code>groundwork-repos</code></a> discovery, and makes the repository and lane obvious. This layout fits Groundwork's default <code>max_depth</code>; increase it if a customized repository-discovery depth no longer reaches the lane. If you changed the roots in <code>~/.config/groundwork/repos.conf</code>, put <code>.worktrees</code> under one of those roots instead.</p>
+      <p>For persistent agent work, use <code>&lt;configured-root&gt;/.worktrees/&lt;unique-repo-slug&gt;/&lt;lane&gt;</code>. With Groundwork's default repository root, one example is <code>~/code/.worktrees/example-myrepo/fix-auth</code>. The repository slug should be stable and unique — use <code>owner-project</code> or another unambiguous name when common basenames such as <code>api</code>, <code>docs</code>, or <code>web</code> could collide. The path stays outside the main checkout, survives reboots, remains within <a href="https://jasondockery.github.io/groundwork/repo-navigation.html"><code>groundwork-repos</code></a> discovery, and makes the repository and lane obvious. This layout fits Groundwork's default <code>max_depth</code>; increase it if a customized repository-discovery depth no longer reaches the lane. If you changed the roots in <code>~/.config/groundwork/repos.conf</code>, put <code>.worktrees</code> under one of those roots instead.</p>
       <p>Never nest a linked worktree inside its main checkout: it appears as untracked content in the parent and invites an agent to commit one working directory into another. A location under <code>/private/tmp</code> is reasonable for proof you will discard in the same task, but it is normally outside configured roots, so Groundwork's cross-repository picker and dirty-work supervision will not see it.</p>
       <p>To read an old revision without disturbing any branch, use a detached one and delete it after: <code>git worktree add --detach ~/code/.worktrees/example-myrepo/review-v1.4.0 v1.4.0</code>.</p>
 
@@ -203,7 +203,7 @@
       </table>
       <div class="callout note">
         <span class="label">Groundwork already knows about them</span>
-        <p><a href="repo-navigation.html"><code>groundwork-repos</code></a> lists linked worktrees alongside ordinary clones and marks them <code>wt</code>, because a worktree you've forgotten about is exactly the one holding uncommitted agent work. Set <code>include_worktrees = false</code> in <code>~/.config/groundwork/repos.conf</code> if you'd rather not see them.</p>
+        <p><a href="https://jasondockery.github.io/groundwork/repo-navigation.html"><code>groundwork-repos</code></a> lists linked worktrees alongside ordinary clones and marks them <code>wt</code>, because a worktree you've forgotten about is exactly the one holding uncommitted agent work. Set <code>include_worktrees = false</code> in <code>~/.config/groundwork/repos.conf</code> if you'd rather not see them.</p>
       </div>
 
       <h2><span class="hash" aria-hidden="true">#</span>How many agents should be writing?</h2>
@@ -259,9 +259,9 @@
       <h2><span class="hash" aria-hidden="true">#</span>Go deeper</h2>
       <ul>
         <li><a href="https://git-scm.com/docs/git-worktree" target="_blank" rel="noopener">git-worktree documentation</a>: the authoritative reference for every subcommand and flag.</li>
-        <li><a href="git.html">Git</a>: branches, commits, and the daily loop these build on.</li>
+        <li><a href="https://jasondockery.github.io/groundwork/git.html">Git</a>: branches, commits, and the daily loop these build on.</li>
         <li><a href="agents.html">AI agents &amp; rules</a>: what to put in an agent's instructions before you hand it a worktree.</li>
-        <li><a href="repo-navigation.html">Repo navigation</a>: finding the worktrees you've already made.</li>
+        <li><a href="https://jasondockery.github.io/groundwork/repo-navigation.html">Repo navigation</a>: finding the worktrees you've already made.</li>
       </ul>
 
       <div class="pagenav">
