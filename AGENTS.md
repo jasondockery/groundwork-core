@@ -17,14 +17,15 @@ Read `README.md` and `AI_THESIS.md` before changing the shared pages.
 - Syncthing shared folders, the FreeTube one-machine rule, and device pairing have one source in `docs/syncthing.md`. The decision record is `docs/decisions/syncthing-shared-folders.md`. Package installation and the service manager stay in the environment repos. Device IDs, API keys, and Tailscale addresses stay on the machine.
 - An installer that needs administrator permission asks once at the start when a terminal is available. When nobody can enter a password, it sets aside only the steps that need that permission, continues the rest, and retries those steps on the next apply from a terminal. It does not record that partial install as finished. A step later work depends on, such as the Linux packages Homebrew itself needs, stops with a recovery command instead of continuing.
 - T3 Code Nightly and Herdr are the selected shared tool direction; do not invent an upstream `edge` channel or install anything from this documentation-only repo.
-- Use [Compass](https://github.com/jasondockery/compass) as shared engineering guidance and the shared Renovate preset for dependency policy. These references do not imply receipt-verified projection or central-runner coverage.
+- Engineering work follows Compass: start at `.compass/COMPASS.md`, with terms in `.compass/TERMINOLOGY.md`. Load `skills/reviewable-agent-workspaces/SKILL.md` before implementation or worktree changes, `skills/concurrent-agent-runtimes/SKILL.md` before starting or inspecting concurrent processes, and `skills/repeatable-agent-execution/SKILL.md` before the first edit in a checkout and before final proof. Selected skills, loaded from `skills/` when a task touches their area: `acceptance-evidence`, `accessible-product-development`, `agent-orchestration`, `ai-backend-change`, `ci-workflow-change`, `dependency-change`, `developer-tool-change`, `field-failure-backpressure`, `github-delivery-workflow`, `inclusive-content-design`, `inclusive-product-foundation`, `independent-code-review`, `internationalization-first`, `performance-sensitive-change`, `privacy-by-design`, `repo-contribution-etiquette`, `secure-by-design`, `shell-script-change`, `skill-authoring`, `terminal-program-ux`, `testing-strategy`, `toolchain-authority`. GitHub writes follow `repo-contribution-etiquette` (act as the account that owns the repository).
+- The shared Renovate preset covers dependency policy; that reference does not imply central-runner coverage.
 
 ## Layout
 
 | Path | Role |
 |---|---|
 | `docs/` | Shared teaching pages. See `docs/README.md`. |
-| `skills/` | Local documentation procedure and imported references; read `skills/README.md` before selecting one. |
+| `skills/` | Opted-in Compass skills (receipt-verified) and local documentation skills; read `skills/README.md`; read `skills/README.md` before selecting one. |
 | `skel/` | Project scaffolds a person can copy. |
 | `omarchy/` | Data-only Omarchy plugin manifests. See `omarchy/README.md`. |
 | `AI_THESIS.md` | North star. Environment repos should point here rather than restating it. |
