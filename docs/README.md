@@ -4,7 +4,7 @@ Current shared operational guidance lives in [AI tools and remote access](ai-too
 
 The learning curriculum stays at the original [Groundwork site](https://jasondockery.github.io/groundwork/) for now. The imported HTML pages below are historical reference from the initial split, not the current learner navigation.
 
-The HTML still has the original site menu. Links to setup, tmux keys, the shell, Homebrew, and the Mac desktop go to `groundwork-mac`, which has those pages. They are not copied here.
+The HTML still has the original site menu. Menu links to pages that are not in this directory, such as setup, tmux keys, the shell, and Homebrew, go to the original [Groundwork site](https://jasondockery.github.io/groundwork/). They are not copied here.
 
 | Here | Lives in the environment repo |
 |---|---|
