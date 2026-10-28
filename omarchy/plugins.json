@@ -80,6 +80,9 @@
             "repo": "https://github.com/tornikegomareli/omarchy-spaces.git",
             "reason": "Shows the apps open on each workspace and replaces the stock Workspaces bar widget.",
             "batch": 2,
+            "replaces": [
+                "omarchy.workspaces"
+            ],
             "arch": [
                 "aarch64",
                 "x86_64"

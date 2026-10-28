@@ -30,7 +30,8 @@ belong in the file.
 | `reason` | Why this plugin is on the shared list. Required on every entry. |
 | `batch` | The batch that added the entry. Batch 1 is the first shared list. |
 | `arch` | Optional. `uname -m` names that install the plugin, such as `aarch64` and `x86_64`. The applier skips an entry whose `arch` omits the machine. |
-| `section` | Optional. Bar side when the entry sets one: `left`, `center`, or `right`. Omit it and the plugin keeps its own placement. |
+| `section` | Optional. Bar section when the entry sets one: `left`, `centerBegin`, `center`, `centerEnd`, `tray`, or `right`. Omit it and the plugin keeps its own placement. |
+| `replaces` | Optional. Ids of plugins this entry supersedes, such as a stock bar widget. After the applier enables this plugin, it runs `omarchy plugin disable` once for each replaced id that is still on, records that, and never repeats it. |
 | `setup` | Optional. After the first install, the applier runs `command` from the plugin directory, and again when an update moves that plugin. `needsSudo` is true when the command needs administrator permission. |
 
 `retired` lists plugins this list previously installed and now removes. Each
@@ -70,9 +71,10 @@ would place it in `centerEnd`.
 
 `tornikegomareli.spaces` replaces the stock Workspaces bar widget,
 `omarchy.workspaces`. Omarchy's default bar places that widget on the left, in
-`bar.layout.left`, beside the menu. The environment applier disables it with
-`omarchy plugin disable omarchy.workspaces` when that applier enables Spaces.
-That disable is the bar change, and it lives in the environment repository.
+`bar.layout.left`, beside the menu. The Spaces entry lists
+`omarchy.workspaces` in `replaces`, so the applier runs
+`omarchy plugin disable omarchy.workspaces` once after it enables Spaces. The
+list names the swap; the environment applier carries it out and names no ids.
 
 ## Left out
 
