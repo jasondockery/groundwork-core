@@ -25,7 +25,7 @@ Read `README.md` and `AI_THESIS.md` before changing the shared pages.
 | Path | Role |
 |---|---|
 | `docs/` | Shared teaching pages. See `docs/README.md`. |
-| `skills/` | Local documentation procedure and imported references; read `skills/README.md` before selecting one. |
+| `skills/` | Opted-in Compass skills (receipt-verified) and local documentation skills; read `skills/README.md`; read `skills/README.md` before selecting one. |
 | `skel/` | Project scaffolds a person can copy. |
 | `omarchy/` | Data-only Omarchy plugin manifests. See `omarchy/README.md`. |
 | `AI_THESIS.md` | North star. Environment repos should point here rather than restating it. |
