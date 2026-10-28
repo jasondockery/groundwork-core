@@ -32,8 +32,8 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 
 - `AI_THESIS.md`, the north star for the family
 - `docs/`, the pages that teach the path, agent supervision, and the learning tracks
-- [`skills/README.md`](skills/README.md), the local documentation procedure and
-  imported reference material; active shared engineering skills belong to Compass
+- [`skills/README.md`](skills/README.md), the opted-in Compass skills (verified by
+  `.compass/check-projection.mjs`) and this repo's own documentation skills
 - `skel/`, project scaffolds
 - [`docs/ai-tools-and-remote-access.md`](docs/ai-tools-and-remote-access.md), shared T3 Code, Herdr, and Tailscale guidance
 - [`docs/local-models.md`](docs/local-models.md), shared evaluation and privacy guidance for optional local models
