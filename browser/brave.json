@@ -34,6 +34,12 @@
             "reason": "Jason uses separate AI tools; Leo's sidebar and prompts are redundant."
         },
         {
+            "name": "BraveLocalAIEnabled",
+            "value": false,
+            "upstreamDefault": true,
+            "reason": "Jason decided on 2026-10-29 to turn off Brave's AI features because he uses separate AI tools. This policy is the master switch for local AI. The history-embeddings pref is already false."
+        },
+        {
             "name": "BraveP3AEnabled",
             "value": false,
             "upstreamDefault": true,

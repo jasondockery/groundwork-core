@@ -14,7 +14,7 @@ Brave's release channel is the default browser on every Groundwork machine: macO
 
 This supersedes the 2026-10-24 browser choice: Chrome Stable on macOS and Omarchy's Chromium on Omarchy ([groundwork-mac#27](https://github.com/jasondockery/groundwork-mac/issues/27), [groundwork-core#9](https://github.com/jasondockery/groundwork-core/issues/9), both closed).
 
-Jason chose Brave for privacy. Shields blocks ads and trackers by default. The browser is Chromium-based, so the existing Chrome Web Store catalog and Chromium policies still apply. Every OS in the family has an official install path.
+Jason chose Brave for privacy. Shields blocks ads and trackers by default. Brave is Chromium-based, so it can install Chrome Web Store extensions, and Chromium policies still apply. Groundwork's offer list is only the Bitwarden row in `browser/brave.json`. Every OS in the family has an official install path.
 
 Brave release is not Brave Origin. Origin is a separate branded build. Omarchy can install it, and this decision does not.
 
@@ -28,15 +28,16 @@ A row is here only when the value differs from the effective default on Brave re
 | `BraveWalletDisabled` | true | false. Unset means Wallet stays enabled. | `BraveWalletDisabled.yaml` in that same directory |
 | `BraveVPNDisabled` | true | false. Unset means VPN stays enabled. | `BraveVPNDisabled.yaml` |
 | `BraveAIChatEnabled` | false | true. Unset means AI Chat stays enabled. The pref `kEnabledByPolicy` registers true. | `BraveAIChatEnabled.yaml`; `components/ai_chat/core/common/pref_names.cc` registers `kEnabledByPolicy` true; `components/ai_chat/core/browser/utils.cc` `IsDisabledByPolicy` |
+| `BraveLocalAIEnabled` | false | true. Unset means local AI stays enabled. `kBraveLocalAIEnabled` registers true. The history-embeddings pref is already false. This policy is the master switch. | `BraveLocalAIEnabled.yaml`; `components/local_ai/core/pref_names.cc` |
 | `BraveP3AEnabled` | false | true on Brave release. Unset means P3A stays enabled. The pref registers `!IS_BRAVE_ORIGIN_BRANDED`. | `BraveP3AEnabled.yaml` ("enabled by default"); `components/p3a/p3a_service.cc` `RegisterBooleanPref(kP3AEnabled, !BUILDFLAG(IS_BRAVE_ORIGIN_BRANDED))` |
 | `BraveStatsPingEnabled` | false | true. Unset means the usage ping stays enabled. The pref registers true. | `BraveStatsPingEnabled.yaml`; `browser/brave_local_state_prefs.cc` registers `kStatsReportingEnabled` true |
-| `PasswordManagerEnabled` | false, only when a third-party password manager is chosen | true | Chromium `components/policy/resources/templates/policy_definitions/PasswordManager/PasswordManagerEnabled.yaml` (`default: true`). Brave's policy map does not replace this Chromium policy. |
+| `PasswordManagerEnabled` | false, only when Bitwarden is the password manager | true | Chromium `components/policy/resources/templates/policy_definitions/PasswordManager/PasswordManagerEnabled.yaml` (`default: true`). Brave's policy map does not replace this Chromium policy. |
 
 Leo is Brave's AI assistant (AI Chat). `BraveAIChatEnabled` false is a managed preference, and `IsAIChatEnabled` is then false. Brave's `browser/ai_chat/ai_chat_policy_browsertest.cc` shows that this removes the sidebar item, the address-bar Leo autocomplete provider, the side panel entry, and the context-menu item. Those surfaces are not separate policies, so they do not get their own rows.
 
 The new-tab day-zero input is the pref `kNtpInputDayZeroEnabled`, registered false in `pref_names.cc`. It has no policy. Groundwork does not invent one.
 
-`BraveLocalAIEnabled` was read in `BraveLocalAIEnabled.yaml`. Unset means local AI stays enabled. That feature is on-device history embeddings, not Leo. It is not overridden.
+`BraveLocalAIEnabled` is false because Jason decided on 2026-10-29 to turn off Brave's AI features because he uses separate AI tools. Any other Brave AI surface that is on by default follows that decision. This policy is the master switch for local AI, including later on-device surfaces. The history-embeddings pref `kBraveHistoryEmbeddingsEnabled` is already false. Unset would leave the master switch on.
 
 Also checked and left unset, because the effective default is already what Groundwork wants, or because no change was called for:
 
@@ -46,7 +47,7 @@ Also checked and left unset, because the effective default is already what Groun
 | `BraveTalkDisabled` | Talk stays available | `BraveTalkDisabled.yaml` |
 | `TorDisabled` | Tor stays available when the person opens a private window with Tor | `TorDisabled.yaml` |
 | `BraveWebDiscoveryEnabled` | Off | `BraveWebDiscoveryEnabled.yaml` ("disabled by default") |
-| Shields | On. The templates expose per-URL exceptions, not a global off switch. No URL list is set. | `BraveShieldsDisabledForUrls.yaml`, `BraveShieldsEnabledForUrls.yaml` |
+| Shields | On. The URL policies are per-URL, and no URL list is set. `DefaultBraveAdblockSetting` is a global control, and leaving it unset already blocks ads. The other `DefaultBrave*` defaults match Groundwork when unset. | `BraveShieldsDisabledForUrls.yaml`, `BraveShieldsEnabledForUrls.yaml`, `DefaultBraveAdblockSetting.yaml` |
 
 `BraveStatsPingEnabled` stays in the override list because browser updates still work with the ping off. `browser/brave_stats/buildflags.gni` sets the ping host to `https://usage-ping.brave.com`. `BraveStatsUpdater::OnServerPingTimerFired` returns before `SendServerPing` when `kStatsReportingEnabled` is false. Linux updates come from the package repository, macOS updates come from Sparkle (`auto_updates` on the Homebrew cask), and Windows updates come from Brave's updater. None of those read this pref.
 
@@ -66,7 +67,7 @@ groundwork-mac's `home/dot_local/share/groundwork/browser-extensions.tsv` is not
 
 ### Chrome
 
-The 2026-10-24 choice on macOS. Chrome does not ship Shields. A Google account and Chrome's own product reporting are the default shape of that browser. The extension catalog was already written for Chrome Web Store ids, and Brave installs those same extensions, so staying on Chrome is not required for the catalog.
+The 2026-10-24 choice on macOS. Chrome does not ship Shields. A Google account and Chrome's own product reporting are the default shape of that browser. Brave can install Chrome Web Store extensions. Groundwork's offer list is only the Bitwarden row in `browser/brave.json`, so staying on Chrome is not required for that extension.
 
 ### Chromium
 
@@ -74,7 +75,7 @@ Omarchy's base browser, and the previous Omarchy default. It has no Shields and 
 
 ### Firefox
 
-Firefox has its own extension store and its own policy names. The catalog, the Chromium policy list, and Omarchy's Chromium-family browser flags would not carry over. Groundwork would be maintaining a second browser contract for a default it does not need.
+Firefox has its own extension store and its own policy names. The Bitwarden offer, Chromium policies, and Omarchy's Chromium-family browser flags would not carry over. Groundwork would be maintaining a second browser contract for a default it does not need.
 
 ### Helium
 

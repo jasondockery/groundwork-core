@@ -68,11 +68,12 @@ is not changing them:
 | `BraveNewsDisabled` | News stays available | No override. |
 | `BraveTalkDisabled` | Talk stays available | No override. |
 | `TorDisabled` | Tor stays available for a private window with Tor | No override. |
-| Shields URL exceptions | No site list | Shields stays on. There is no global "turn Shields off" policy in the template set. |
+| Shields | Ads stay blocked | The URL policies are per-URL, and no URL list is set. `DefaultBraveAdblockSetting` is a global control, and leaving it unset already blocks ads. The other `DefaultBrave*` defaults match Groundwork when unset. |
 | `BraveWebDiscoveryEnabled` | Off | Already the privacy outcome. |
-| `BraveLocalAIEnabled` | On | On-device history embeddings, not Leo. Leo's sidebar, address-bar provider, and side panel are `BraveAIChatEnabled`. |
 
 Leo's address bar and new-tab surfaces are not separate policies.
 `BraveAIChatEnabled` set to false removes the sidebar item and the address-bar
 Leo provider. The new-tab day-zero input pref defaults to off and has no
-policy of its own.
+policy of its own. `BraveLocalAIEnabled` is false. It is the master switch
+for local AI. The history-embeddings pref is already false. Jason decided on
+2026-10-29 to turn off Brave's AI features because he uses separate AI tools.

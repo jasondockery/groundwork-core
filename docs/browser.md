@@ -49,7 +49,7 @@ Set the default only after the person confirms. macOS and Windows ask in the ope
 
 `browser/brave.json` is the only list of policy overrides. Each one differs from Brave's effective default and has a reason. Leo, Brave's AI assistant, is off: `BraveAIChatEnabled` is false. That one policy removes Leo's sidebar and the address-bar Leo provider. There is no second policy for the address bar or the new tab page. The new-tab day-zero input pref ships off.
 
-`BraveLocalAIEnabled` is not Leo. It is on-device history embeddings, and Brave leaves it on when the policy is unset. Groundwork does not override it.
+`BraveLocalAIEnabled` is false. Jason decided on 2026-10-29 to turn off Brave's AI features because he uses separate AI tools. This policy is the master switch for local AI, including later on-device surfaces. The history-embeddings pref is already false. Unset would leave that switch on.
 
 Bitwarden (`nngceckbapebfimnlniiiahkandclblb`) is the only extension Groundwork offers, on every OS. It is offered, never force-installed. Jason decided on 2026-10-29 to stick with Bitwarden only. No AI or other extensions are offered. `PasswordManagerEnabled` is false only when Bitwarden is the password manager, so the built-in manager does not compete with it. uBlock Origin Lite stays out with the rest. Shields already blocks ads and trackers, and two blockers on one page cause breakage.
 

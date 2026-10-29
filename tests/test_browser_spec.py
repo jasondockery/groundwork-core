@@ -46,6 +46,7 @@ POLICIES = {
     "BraveWalletDisabled": (True, False),
     "BraveVPNDisabled": (True, False),
     "BraveAIChatEnabled": (False, True),
+    "BraveLocalAIEnabled": (False, True),
     "BraveP3AEnabled": (False, True),
     "BraveStatsPingEnabled": (False, True),
     "PasswordManagerEnabled": (False, True),
@@ -56,12 +57,16 @@ LEFT_UNSET = (
     "BraveTalkDisabled",
     "TorDisabled",
     "BraveWebDiscoveryEnabled",
-    "BraveLocalAIEnabled",
     "BraveShieldsDisabledForUrls",
     "BraveShieldsEnabledForUrls",
 )
 
 LEO_REASON = "Jason uses separate AI tools; Leo's sidebar and prompts are redundant."
+LOCAL_AI_REASON = (
+    "Jason decided on 2026-10-29 to turn off Brave's AI features because he uses separate AI tools. "
+    "This policy is the master switch for local AI. The history-embeddings pref is already false."
+)
+EXTENSION_KEYS = frozenset({"name", "id", "updateUrl", "install", "reason"})
 EXTENSION_DECISION = "Jason decided on 2026-10-29 to stick with Bitwarden only. No AI or other extensions are offered."
 
 
@@ -117,6 +122,11 @@ class BrowserSpecTest(unittest.TestCase):
         self.assertTrue(leo["upstreamDefault"])
         self.assertEqual(leo["reason"], LEO_REASON)
         self.assertNotIn("when", leo)
+        local_ai = by_name["BraveLocalAIEnabled"]
+        self.assertFalse(local_ai["value"])
+        self.assertTrue(local_ai["upstreamDefault"])
+        self.assertEqual(local_ai["reason"], LOCAL_AI_REASON)
+        self.assertNotIn("when", local_ai)
         passwords = by_name["PasswordManagerEnabled"]
         self.assertFalse(passwords["value"])
         self.assertTrue(passwords["upstreamDefault"])
@@ -128,6 +138,7 @@ class BrowserSpecTest(unittest.TestCase):
         spec = _load()
         self.assertEqual(len(spec["extensions"]), 1)
         extension = spec["extensions"][0]
+        self.assertEqual(set(extension), set(EXTENSION_KEYS))
         self.assertEqual(extension["name"], "Bitwarden")
         self.assertEqual(extension["id"], BITWARDEN_ID)
         self.assertIsNotNone(EXTENSION_ID.fullmatch(extension["id"]))
@@ -145,6 +156,13 @@ class BrowserSpecTest(unittest.TestCase):
         self.assertNotIn(UBO_LITE_ID, blob)
         self.assertNotIn("ExtensionInstallForcelist", blob)
         self.assertNotIn("1Password", blob)
+
+    def test_force_install_key_is_rejected(self) -> None:
+        extension = dict(_load()["extensions"][0])
+        extension["forceInstall"] = True
+        self.assertNotEqual(set(extension), set(EXTENSION_KEYS))
+        self.assertIn("forceInstall", set(extension) - EXTENSION_KEYS)
+        self.assertFalse(set(extension) <= EXTENSION_KEYS)
 
     def test_no_installer_commands_or_account_data_under_browser(self) -> None:
         files = sorted(path for path in BROWSER.rglob("*") if path.is_file())
@@ -174,6 +192,12 @@ class BrowserSpecTest(unittest.TestCase):
         self.assertIn("never force-installed", page)
         self.assertIn("no `browser/extension-catalog.tsv`", decision)
         self.assertIn("1Password is not a condition and not an offered extension.", decision)
+        self.assertNotIn("third-party password manager", decision)
+        self.assertIn("false, only when Bitwarden is the password manager", decision)
+        self.assertIn("It never forces.", page)
+        self.assertIn("Nothing is uninstalled automatically", page)
+        self.assertIn("no profile data is deleted", page)
+        self.assertIn("Detect and offer, never force", decision)
         self.assertNotIn(ONEPASSWORD_ID, page)
         self.assertNotIn(ONEPASSWORD_ID, decision)
         self.assertNotIn(UBO_LITE_ID, page)
