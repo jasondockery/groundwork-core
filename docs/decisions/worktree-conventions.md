@@ -41,7 +41,7 @@ A fresh worktree has tracked files only. Ignored files such as `.env` stay in th
 
 Linked worktrees share one Git config. A `git config` edit is visible from every worktree. Use `git config --worktree` only after `extensions.worktreeConfig` is on, and only for a setting that is supposed to differ.
 
-Do not put a linked worktree inside its main checkout. Git will show it as untracked files. Do not put a manual lane under `~/.cursor/worktrees`. Cursor 3.5 cleanup keeps a machine-wide maximum (default 25, setting `cursor.worktreeMaxCount`) and can delete worktrees it finds under that root, including ones `git worktree add` created there.
+Keep a manual lane outside the main checkout. A linked worktree that is not ignored shows up as untracked files in the parent. Claude Code's default path is inside the checkout, and its docs tell you to ignore `.claude/worktrees/`. Leave that path ignored. Do not add another nested worktree beside it. Do not put a manual lane under `~/.cursor/worktrees`. Cursor 3.5 cleanup keeps a machine-wide maximum (default 25, setting `cursor.worktreeMaxCount`) and can delete worktrees it finds under that root, including ones `git worktree add` created there.
 
 ## After the change merges
 
