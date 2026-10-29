@@ -167,14 +167,14 @@ Stop when a check fails. Delete the fresh clone if you want to start over. The d
 
 1. Reachable hits are zero. Run the counter in `reachable` mode. It must print `0`. If it does not, run `kinds`. When `blob`, `commit`, and `tag` are 0 and `tree` is not, the remaining hits are paths. `--replace-text` does not rename paths. Stop and ask the owner. Do not publish. Do not repeat `--replace-text` expecting it to clear a path.
 2. The commit count matches the number recorded after the fetch above and before the rewrite. Compare `git rev-list --all --count` to that number. A count taken before that fetch is the wrong baseline. On a clone that is not a mirror, `--sensitive-data-removal` runs `git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*` inside the rewrite, so a count taken before that fetch rises when pull-request commits are added even though the rewrite only replaced text. A different count from the recorded baseline means a commit was dropped or a ref was missing. Do not push.
-3. Each tip tree differs only in the replaced lines. `.git/filter-repo/commit-map` maps old commits to new ones. Pair each old tip with its new tip and run `git diff-tree -r` on that pair while the commit-map's old objects still exist. Read the diff on this machine. It shows the removed text. Do not copy it into an issue, a commit, or a ticket. Any other change is a stop. After that diff passes, prune:
+3. Each tip tree differs only in the replaced lines. `.git/filter-repo/commit-map` maps old commits to new ones. Pair each old tip with its new tip and run `git diff-tree -r -p` on that pair while the commit-map's old objects still exist. Read that patch on this machine. The patch shows the removed text and `***REMOVED***`. Keep the patch on this machine. Do not copy it into an issue, a commit, or a ticket. Any change other than those replaced lines is a stop. After that patch passes, prune:
 
 ```bash
 git reflog expire --expire=now --all
 git gc --prune=now
 ```
 
-Prune only after that diff. With `--no-gc`, the all-object scan still sees the pre-rewrite objects until this prune, so that scan is still the wrong gate. `reachable` is the gate.
+Prune only after that patch. With `--no-gc`, the all-object scan still sees the pre-rewrite objects until this prune, so that scan is still the wrong gate. `reachable` is the gate.
 
 4. Count moved pull-request refs with `grep -c '^refs/pull/.*/head$' .git/filter-repo/changed-refs`. Keep the first changed commit SHAs from the tool's `NOTE: First Changed Commit(s)` line. Later notes use those SHAs and that count. They do not use the text.
 

@@ -52,7 +52,7 @@ REQUIRED = (
     "when the local tag object is not the remote tag object",
     "Git reports everything up-to-date.",
     "deletes the pre-rewrite objects before the command returns",
-    "Prune only after that diff.",
+    "Prune only after that patch.",
     "GitHub advertises `refs/pull/*`.",
     "kinds",
     "git filter-repo -h",
@@ -105,8 +105,13 @@ class HistoryPurgeDocsTest(unittest.TestCase):
         first_remote = text.index("git ls-remote origin 'refs/heads/*' 'refs/tags/*'")
         self.assertLess(before, first_remote)
         self.assertLess(first_remote, rewrite)
-        diff_at = text.index("git diff-tree -r")
-        prune_at = text.index("Prune only after that diff.")
+        verify = text.split("3. Each tip tree", 1)[1].split("\n4. ", 1)[0]
+        self.assertTrue(
+            "git diff-tree -r -p" in verify or "git diff-tree -r --patch" in verify,
+            verify,
+        )
+        diff_at = text.index("git diff-tree -r -p")
+        prune_at = text.index("Prune only after that patch.")
         self.assertLess(diff_at, prune_at)
         self.assertLess(prune_at, text.index("git gc --prune=now", prune_at))
         self.assertNotIn("does not advertise", text)
