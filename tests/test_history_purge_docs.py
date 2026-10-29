@@ -37,9 +37,24 @@ REQUIRED = (
     "remote.origin.mirror",
     "--force-with-lease=refs/heads/main:<recorded-sha>",
     "--force-with-lease=refs/tags/v1.2.3:<recorded-sha>",
-    "A count taken before the pull-ref fetch is the wrong baseline.",
+    "A count taken before that fetch is the wrong baseline.",
     'b"tree"',
     "This page does not use that form.",
+    "--no-gc",
+    'git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*',
+    "Do not run that command.",
+    "git ls-remote origin 'refs/heads/*' 'refs/tags/*'",
+    "keep that list outside the clone",
+    "before the rewrite",
+    "does not rename paths",
+    "Stop and ask the owner.",
+    "Do not repeat `--replace-text`",
+    "when the local tag object is not the remote tag object",
+    "Git reports everything up-to-date.",
+    "deletes the pre-rewrite objects before the command returns",
+    "Prune only after that diff.",
+    "GitHub advertises `refs/pull/*`.",
+    "kinds",
 )
 
 
@@ -64,6 +79,18 @@ class HistoryPurgeDocsTest(unittest.TestCase):
         docs_index = (ROOT / "docs" / "README.md").read_text()
         self.assertIn("docs/history-purge.md", readme)
         self.assertIn("history-purge.md", docs_index)
+        before = text.index("## Before anyone pushes")
+        rewrite = text.index("## Rewrite")
+        first_remote = text.index("git ls-remote origin 'refs/heads/*' 'refs/tags/*'")
+        self.assertLess(before, first_remote)
+        self.assertLess(first_remote, rewrite)
+        diff_at = text.index("git diff-tree -r")
+        prune_at = text.index("Prune only after that diff.")
+        self.assertLess(diff_at, prune_at)
+        self.assertLess(prune_at, text.index("git gc --prune=now", prune_at))
+        self.assertNotIn("does not advertise", text)
+        self.assertNotIn("Re-add `origin`", text)
+        self.assertNotIn("removes the `origin` remote", text)
         for source in (PAGE, ROOT / "README.md", ROOT / "docs" / "README.md"):
             for link in re.findall(r"\[[^\]]+\]\(([^)]+)\)", source.read_text()):
                 target = link.split("#", 1)[0].strip()
@@ -111,6 +138,19 @@ class HistoryPurgeDocsTest(unittest.TestCase):
                 self.assertEqual(result.stdout.strip(), expected)
                 self.assertNotIn("secret-token-value", result.stdout)
                 self.assertNotIn("secret-token-value", result.stderr)
+            kinds = subprocess.run(
+                ["python3", str(counter), "kinds", str(needle)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                kinds.stdout,
+                "blob 1\ncommit 0\ntag 0\ntree 0\n",
+            )
+            self.assertEqual(kinds.stderr, "")
+            self.assertNotIn("secret-token-value", kinds.stdout)
 
             git("reset", "--hard", "HEAD~1")
             result = subprocess.run(
@@ -130,6 +170,19 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             )
             self.assertNotEqual(leftover.stdout.strip(), "0")
             self.assertNotIn("secret-token-value", leftover.stdout)
+            kinds = subprocess.run(
+                ["python3", str(counter), "kinds", str(needle)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                kinds.stdout,
+                "blob 0\ncommit 0\ntag 0\ntree 0\n",
+            )
+            self.assertEqual(kinds.stderr, "")
+            self.assertNotIn("secret-token-value", kinds.stdout)
 
     def test_counter_finds_a_filename_only_needle_in_both_modes(self) -> None:
         script = _script()
@@ -168,6 +221,19 @@ class HistoryPurgeDocsTest(unittest.TestCase):
                 self.assertEqual(result.stdout.strip(), "1")
                 self.assertNotIn("secret-token-value", result.stdout)
                 self.assertNotIn("secret-token-value", result.stderr)
+            kinds = subprocess.run(
+                ["python3", str(counter), "kinds", str(needle)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                kinds.stdout,
+                "blob 0\ncommit 0\ntag 0\ntree 1\n",
+            )
+            self.assertEqual(kinds.stderr, "")
+            self.assertNotIn("secret-token-value", kinds.stdout)
 
 
 if __name__ == "__main__":
