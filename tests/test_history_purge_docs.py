@@ -61,6 +61,9 @@ REQUIRED = (
     "Do not compare `git filter-repo --version` to `2.47`.",
     'git update-ref "refs/remotes/origin/${branch}" "refs/heads/${branch}"',
     "Do not pass `--force` to `git update-ref` or to `git filter-repo`.",
+    "git repack -ad",
+    "expected freshly packed repo",
+    "`git rev-list --all --count` is the same after that repack as it was before it.",
 )
 
 
@@ -90,9 +93,13 @@ class HistoryPurgeDocsTest(unittest.TestCase):
         self.assertNotIn("The check is `git filter-repo --version`.", text)
         fetch_at = text.index('git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*')
         restore_at = text.index('git update-ref "refs/remotes/origin/${branch}" "refs/heads/${branch}"')
+        repack_at = text.index("git repack -ad")
         rewrite_at = text.index("git filter-repo --sensitive-data-removal --no-gc --replace-text")
         self.assertLess(fetch_at, restore_at)
-        self.assertLess(restore_at, rewrite_at)
+        self.assertLess(restore_at, repack_at)
+        self.assertLess(repack_at, rewrite_at)
+        self.assertNotIn("A bare mirror skips this check.", text)
+        self.assertNotIn("so the fresh-clone check can pass", text)
         before = text.index("## Before anyone pushes")
         rewrite = text.index("## Rewrite")
         first_remote = text.index("git ls-remote origin 'refs/heads/*' 'refs/tags/*'")
@@ -336,6 +343,105 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertEqual(started.returncode, 0, started.stderr)
             self.assertIn("New history written", started.stdout)
             self.assertNotIn("--force", restore)
+
+    def test_repack_after_pull_fetch_lets_filter_repo_start(self) -> None:
+        text = PAGE.read_text()
+        restore = next(
+            block
+            for block in re.findall(r"```bash\n(.*?)```", text, re.S)
+            if 'git update-ref "refs/remotes/origin/${branch}"' in block
+        )
+        repack = next(
+            block
+            for block in re.findall(r"```bash\n(.*?)```", text, re.S)
+            if block.strip() == "git repack -ad"
+        )
+        self.assertNotIn("--force", restore)
+        self.assertNotIn("--force", repack)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin = root / "origin"
+            clone = root / "clone"
+            mirror = root / "mirror"
+            needle = root / "needle.txt"
+            needle.write_bytes(b"secret-token-value\n")
+            os.chmod(needle, 0o600)
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@example.com",
+            }
+
+            def git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=cwd,
+                    check=True,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+
+            def rewrite(cwd: Path) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [
+                        "git", "filter-repo", "--sensitive-data-removal", "--no-gc",
+                        "--replace-text", str(needle),
+                    ],
+                    cwd=cwd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+
+            def commit_count(cwd: Path) -> str:
+                return git("rev-list", "--all", "--count", cwd=cwd).stdout.strip()
+
+            origin.mkdir()
+            git("init", "-b", "main", cwd=origin)
+            (origin / "note.txt").write_text("prefix secret-token-value suffix\n", encoding="utf-8")
+            git("add", "note.txt", cwd=origin)
+            git("commit", "-m", "add secret", cwd=origin)
+            git("repack", "-ad", cwd=origin)
+            git("clone", "--no-local", str(origin), str(clone), cwd=root)
+            git("clone", "--mirror", "--no-local", str(origin), str(mirror), cwd=root)
+            (origin / "pull-only.txt").write_text("pull-only\n", encoding="utf-8")
+            git("add", "pull-only.txt", cwd=origin)
+            git("commit", "-m", "pull only", cwd=origin)
+            git("update-ref", "refs/pull/1/head", "HEAD", cwd=origin)
+            git("reset", "--hard", "HEAD~1", cwd=origin)
+
+            def fetch(cwd: Path) -> None:
+                git(
+                    "fetch", "-q", "--prune", "--update-head-ok", "--refmap", "",
+                    "origin", "+refs/*:refs/*",
+                    cwd=cwd,
+                )
+
+            fetch(clone)
+            before = commit_count(clone)
+            subprocess.run(["bash", "-c", restore], cwd=clone, env=env, check=True)
+            packed = rewrite(clone)
+            self.assertEqual(packed.returncode, 1, packed.stderr)
+            self.assertIn("expected freshly packed repo", packed.stderr)
+            subprocess.run(["bash", "-c", repack], cwd=clone, env=env, check=True)
+            self.assertEqual(commit_count(clone), before)
+            started = rewrite(clone)
+            self.assertEqual(started.returncode, 0, started.stderr)
+            self.assertIn("New history written", started.stdout)
+
+            fetch(mirror)
+            mirror_before = commit_count(mirror)
+            mirror_packed = rewrite(mirror)
+            self.assertEqual(mirror_packed.returncode, 1, mirror_packed.stderr)
+            self.assertIn("expected freshly packed repo", mirror_packed.stderr)
+            subprocess.run(["bash", "-c", repack], cwd=mirror, env=env, check=True)
+            self.assertEqual(commit_count(mirror), mirror_before)
+            mirror_started = rewrite(mirror)
+            self.assertEqual(mirror_started.returncode, 0, mirror_started.stderr)
+            self.assertIn("New history written", mirror_started.stdout)
 
 
 if __name__ == "__main__":

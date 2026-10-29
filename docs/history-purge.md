@@ -49,10 +49,12 @@ That list is the freeze record. Take it before the rewrite. A list taken after t
 git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*
 ```
 
-A non-mirror `--sensitive-data-removal` run performs that fetch. A mirror clone has `remote.origin.mirror` set to true, and 2.47.0 skips the fetch in that case, so a mirror must run that exact command itself before the count. A non-mirror run and a mirror's own `+refs/*:refs/*` refspec both receive the `refs/pull/*` refs the remote advertises. GitHub advertises `refs/pull/*`. `--prune` removes a local ref the remote did not advertise, including a local `refs/pull/*`. The same fetch also removes `refs/remotes/origin/*`. The lease does not use those remote-tracking refs. Step 7 puts them back so the fresh-clone check can pass. Do not fetch pull refs with another refspec and then run a shorter fetch. That shorter fetch prunes a local `refs/pull/*` the remote did not advertise. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect.
+A non-mirror `--sensitive-data-removal` run performs that fetch. A mirror clone has `remote.origin.mirror` set to true, and 2.47.0 skips the fetch in that case, so a mirror must run that exact command itself before the count. A non-mirror run and a mirror's own `+refs/*:refs/*` refspec both receive the `refs/pull/*` refs the remote advertises. GitHub advertises `refs/pull/*`. `--prune` removes a local ref the remote did not advertise, including a local `refs/pull/*`. The same fetch also removes `refs/remotes/origin/*`. The lease does not use those remote-tracking refs. Step 7 puts them back on a non-bare clone. The fetch also leaves more than one pack, or one pack and loose objects, so step 7 repacks before `git filter-repo`. The fresh-clone check does not pass on that restore alone. Do not fetch pull refs with another refspec and then run a shorter fetch. That shorter fetch prunes a local `refs/pull/*` the remote did not advertise. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect.
 
-6. Record `git rev-list --all --count` after that fetch and before the rewrite. The verify step compares against this number. A count taken before that fetch is the wrong baseline.
-7. After that count, and before `git filter-repo`, set each remote-tracking branch to the same commit as the local branch. The fetch in step 5 deletes `refs/remotes/origin/*`. On a non-bare clone, git-filter-repo 2.47.0 then stops before any rewrite, because `refs/heads/<branch>` exists and `refs/remotes/origin/<branch>` does not. For every local branch, with no `--force`:
+6. Record `git rev-list --all --count` after that fetch and before the rewrite. The verify step compares against this number. A count taken before that fetch is the wrong baseline. The repack in step 7 does not change this number.
+7. After that count, and before `git filter-repo`, satisfy the fresh-clone check. Do not pass `--force`.
+
+The fetch in step 5 deletes `refs/remotes/origin/*`. On a non-bare clone, git-filter-repo 2.47.0 stops before any rewrite when `refs/heads/<branch>` exists and `refs/remotes/origin/<branch>` does not. For every local branch:
 
 ```bash
 git for-each-ref --format='%(refname:lstrip=2)' refs/heads | while read -r branch; do
@@ -60,7 +62,13 @@ git for-each-ref --format='%(refname:lstrip=2)' refs/heads | while read -r branc
 done
 ```
 
-Do not pass `--force` to `git update-ref` or to `git filter-repo`. The tool's own fetch may prune `refs/remotes/origin/*` again after that check. A bare mirror skips this check. The clone in step 3 is not a mirror, so this restore is required there.
+Do not pass `--force` to `git update-ref`. That restore does not finish the check. git-filter-repo 2.47.0 also aborts with `expected freshly packed repo` when there is more than one pack, or one pack and any loose object. The step-5 fetch stores the new `refs/pull/*` objects as loose objects, or as a second pack. That pack half runs for a non-bare clone and for a mirror. After the restore loop, run:
+
+```bash
+git repack -ad
+```
+
+A mirror skips the remote-tracking half, so it does not run the restore loop. After the mirror's own step-5 fetch, run `git repack -ad`. Then run `git filter-repo` with no `--force`. `git rev-list --all --count` is the same after that repack as it was before it. Do not pass `--force` to `git update-ref` or to `git filter-repo`. The tool's own fetch may prune `refs/remotes/origin/*` again after the check. The clone in step 3 is not a mirror, so that clone runs both the restore loop and the repack.
 8. Put the exact text in one file outside every repository, mode `0600`. One secret per line when there are several. Do not put that text in a shell command, a commit message, an issue, a pull request, or a support request. The rest of this page calls that file the needle file.
 
 ## Find it without printing it
@@ -143,7 +151,7 @@ The counter needs Python 3.9 or newer. For `all` and `reachable`, stdout is a si
 
 ## Rewrite
 
-From the fresh clone, after step 7, pass `--no-gc` so the old objects survive the diff in the next section. Do not pass `--force`:
+From the fresh clone, after the restore and `git repack -ad` in step 7, pass `--no-gc` so the old objects survive the diff in the next section. Do not pass `--force`:
 
 ```bash
 git filter-repo --sensitive-data-removal --no-gc --replace-text /path/to/needle-file
