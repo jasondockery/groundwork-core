@@ -274,7 +274,11 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("moves the compacted file back", decision)
         self.assertIn("The cheatsheet says Quit, not close the window.", decision)
         self.assertIn(
-            "An index reset of `groundwork-shared` pauses that folder first and resumes it afterwards.",
+            "An index reset of `groundwork-shared` pauses that folder first.",
+            decision,
+        )
+        self.assertIn(
+            "the unpause is retried on the new process after the API answers",
             decision,
         )
         self.assertIn("The wrapper still never pauses it.", decision)
@@ -326,9 +330,15 @@ class SyncthingDocsTest(unittest.TestCase):
             "POST /rest/system/reset?folder=groundwork-shared",
             "must be paused before `POST /rest/system/reset?folder=groundwork-shared`",
             "folder must be paused when resetting",
+            "drops that folder's index and does not scan",
             "pause Shared in the GUI",
-            "resume it on every exit path",
+            "Do not resume when the reset response returns.",
+            "Wait until the API answers again.",
+            'Retry `PATCH /rest/config/folders/groundwork-shared` with only `{"paused": false}` until the new process accepts it.',
+            "The scan that skips `FreeTube` runs when that unpaused folder starts.",
+            "require `GET /rest/db/browse?folder=groundwork-shared&prefix=FreeTube` to be empty",
             "If the folder is not paused yet, do not reset and do not resume.",
+            "A failed reset leaves the same process running.",
             "The only pause of `groundwork-shared` is the index reset above.",
             "Do not announce those entries as deletions.",
         ):
