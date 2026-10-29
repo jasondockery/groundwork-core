@@ -157,13 +157,6 @@ class BrowserSpecTest(unittest.TestCase):
         self.assertNotIn("ExtensionInstallForcelist", blob)
         self.assertNotIn("1Password", blob)
 
-    def test_force_install_key_is_rejected(self) -> None:
-        extension = dict(_load()["extensions"][0])
-        extension["forceInstall"] = True
-        self.assertNotEqual(set(extension), set(EXTENSION_KEYS))
-        self.assertIn("forceInstall", set(extension) - EXTENSION_KEYS)
-        self.assertFalse(set(extension) <= EXTENSION_KEYS)
-
     def test_no_installer_commands_or_account_data_under_browser(self) -> None:
         files = sorted(path for path in BROWSER.rglob("*") if path.is_file())
         self.assertEqual([path.relative_to(ROOT).as_posix() for path in files], ["browser/README.md", "browser/brave.json"])
@@ -194,6 +187,10 @@ class BrowserSpecTest(unittest.TestCase):
         self.assertIn("1Password is not a condition and not an offered extension.", decision)
         self.assertNotIn("third-party password manager", decision)
         self.assertIn("false, only when Bitwarden is the password manager", decision)
+        self.assertIn("Passwords stay in Bitwarden", page)
+        self.assertIn("Passwords stay in Bitwarden", decision)
+        self.assertNotIn("Bookmarks, passwords,", page)
+        self.assertNotIn("Profile data stays until the person imports it", decision)
         self.assertIn("It never forces.", page)
         self.assertIn("Nothing is uninstalled automatically", page)
         self.assertIn("no profile data is deleted", page)

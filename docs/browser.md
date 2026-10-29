@@ -14,7 +14,7 @@ Groundwork detects and offers. It never forces. Nothing is uninstalled automatic
 
 That one line names the preferred method and the exact command in the table below. A Chrome, Chromium, or Brave install from any other source gets the same one line. Brave installed from Flatpak or Snap is a non-preferred source: Brave's Linux page says those packages are not yet working as well as the native packages.
 
-Bookmarks, passwords, history, and extensions move with Brave's own importer at `brave://settings/importData`. Groundwork does not copy a profile directory.
+Bookmarks, history, and extensions move with Brave's own importer at `brave://settings/importData`. Passwords stay in Bitwarden, the only extension Groundwork offers. `PasswordManagerEnabled` is false when Bitwarden is the password manager. Groundwork does not copy a profile directory.
 
 ## Install
 
