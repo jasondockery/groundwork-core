@@ -55,6 +55,12 @@ REQUIRED = (
     "Prune only after that diff.",
     "GitHub advertises `refs/pull/*`.",
     "kinds",
+    "git filter-repo -h",
+    "Stop unless the help text contains `--sensitive-data-removal`.",
+    "A missing command is the same stop.",
+    "Do not compare `git filter-repo --version` to `2.47`.",
+    'git update-ref "refs/remotes/origin/${branch}" "refs/heads/${branch}"',
+    "Do not pass `--force` to `git update-ref` or to `git filter-repo`.",
 )
 
 
@@ -78,7 +84,15 @@ class HistoryPurgeDocsTest(unittest.TestCase):
         readme = (ROOT / "README.md").read_text()
         docs_index = (ROOT / "docs" / "README.md").read_text()
         self.assertIn("docs/history-purge.md", readme)
+        self.assertIn("docs/decisions/worktree-conventions.md", readme)
         self.assertIn("history-purge.md", docs_index)
+        self.assertIn("worktree-conventions.md", docs_index)
+        self.assertNotIn("The check is `git filter-repo --version`.", text)
+        fetch_at = text.index('git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*')
+        restore_at = text.index('git update-ref "refs/remotes/origin/${branch}" "refs/heads/${branch}"')
+        rewrite_at = text.index("git filter-repo --sensitive-data-removal --no-gc --replace-text")
+        self.assertLess(fetch_at, restore_at)
+        self.assertLess(restore_at, rewrite_at)
         before = text.index("## Before anyone pushes")
         rewrite = text.index("## Rewrite")
         first_remote = text.index("git ls-remote origin 'refs/heads/*' 'refs/tags/*'")
@@ -234,6 +248,94 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             )
             self.assertEqual(kinds.stderr, "")
             self.assertNotIn("secret-token-value", kinds.stdout)
+
+    def test_restore_remote_tracking_refs_lets_filter_repo_start(self) -> None:
+        text = PAGE.read_text()
+        restore = next(
+            block
+            for block in re.findall(r"```bash\n(.*?)```", text, re.S)
+            if 'git update-ref "refs/remotes/origin/${branch}"' in block
+        )
+        help_run = subprocess.run(
+            ["git", "filter-repo", "-h"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--sensitive-data-removal", help_run.stdout + help_run.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin = root / "origin"
+            clone = root / "clone"
+            needle = root / "needle.txt"
+            needle.write_bytes(b"secret-token-value\n")
+            os.chmod(needle, 0o600)
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@example.com",
+            }
+
+            def git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=cwd,
+                    check=True,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+
+            origin.mkdir()
+            git("init", "-b", "main", cwd=origin)
+            git("commit", "--allow-empty", "-m", "start", cwd=origin)
+            (origin / "note.txt").write_text("prefix secret-token-value suffix\n", encoding="utf-8")
+            git("add", "note.txt", cwd=origin)
+            git("commit", "-m", "add secret", cwd=origin)
+            git("clone", "--no-local", str(origin), str(clone), cwd=root)
+            git(
+                "fetch", "-q", "--prune", "--update-head-ok", "--refmap", "",
+                "origin", "+refs/*:refs/*",
+                cwd=clone,
+            )
+            missing = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"],
+                cwd=clone,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            aborted = subprocess.run(
+                [
+                    "git", "filter-repo", "--sensitive-data-removal", "--no-gc",
+                    "--replace-text", str(needle),
+                ],
+                cwd=clone,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(aborted.returncode, 1)
+            self.assertIn("refs/remotes/origin/main not found", aborted.stderr)
+            subprocess.run(["bash", "-c", restore], cwd=clone, env=env, check=True)
+            local = git("rev-parse", "refs/heads/main", cwd=clone).stdout.strip()
+            tracked = git("rev-parse", "refs/remotes/origin/main", cwd=clone).stdout.strip()
+            self.assertEqual(local, tracked)
+            started = subprocess.run(
+                [
+                    "git", "filter-repo", "--sensitive-data-removal", "--no-gc",
+                    "--replace-text", str(needle),
+                ],
+                cwd=clone,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+            self.assertIn("New history written", started.stdout)
+            self.assertNotIn("--force", restore)
 
 
 if __name__ == "__main__":

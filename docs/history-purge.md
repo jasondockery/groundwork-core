@@ -10,11 +10,11 @@ Environment repos link this page. They do not copy it.
 
 `git-filter-repo` is not a Groundwork default. This repository does not install it. An environment repo may declare it as an optional per-user tool. An agent checks for it and asks the owner before any install. The agent does not install it, and does not use administrator permission to install it for this procedure.
 
-The check is `git filter-repo --version`. You need 2.47 or newer, because `--sensitive-data-removal` arrived in 2.47. Repology, read on 2026-10-29, still lists older distro builds, including 2.38 and 2.34, so a package name is not a version.
+The check is `git filter-repo -h`. Stop unless the help text contains `--sensitive-data-removal`. A missing command is the same stop. `--sensitive-data-removal` arrived in 2.47. Repology, read on 2026-10-29, still lists older distro builds, including 2.38 and 2.34, so a package name is not proof the flag is present. Do not compare `git filter-repo --version` to `2.47`. That command prints a hash of the script, not the release number.
 
-The per-user command in the 2.47.0 install notes is `pipx install git-filter-repo`. Homebrew, Arch, and Ubuntu also package the name `git-filter-repo`. Use the installer that the environment already uses, then run the version check again. A build older than 2.47 does not satisfy this page.
+The per-user command in the 2.47.0 install notes is `pipx install git-filter-repo`. Homebrew, Arch, and Ubuntu also package the name `git-filter-repo`. Use the installer that the environment already uses, then run `git filter-repo -h` again. Help text that does not contain `--sensitive-data-removal` does not satisfy this page.
 
-Try the check on a terminal: run `git filter-repo --version`. If the command is missing, or the version is below 2.47, stop and ask the owner. Do not practice a rewrite on a repository you use.
+Try the check on a terminal: run `git filter-repo -h`. Stop unless the help text contains `--sensitive-data-removal`. A missing command is the same stop. Do not practice a rewrite on a repository you use.
 
 ## Rotate first
 
@@ -49,10 +49,19 @@ That list is the freeze record. Take it before the rewrite. A list taken after t
 git fetch -q --prune --update-head-ok --refmap "" origin +refs/*:refs/*
 ```
 
-A non-mirror `--sensitive-data-removal` run performs that fetch. A mirror clone has `remote.origin.mirror` set to true, and 2.47.0 skips the fetch in that case, so a mirror must run that exact command itself before the count. A non-mirror run and a mirror's own `+refs/*:refs/*` refspec both receive the `refs/pull/*` refs the remote advertises. GitHub advertises `refs/pull/*`. `--prune` removes a local ref the remote did not advertise, including a local `refs/pull/*`. The same fetch also removes `refs/remotes/origin/*`. This page does not use those remote-tracking refs for the lease. Do not fetch pull refs with another refspec and then run a shorter fetch. That shorter fetch prunes a local `refs/pull/*` the remote did not advertise. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect.
+A non-mirror `--sensitive-data-removal` run performs that fetch. A mirror clone has `remote.origin.mirror` set to true, and 2.47.0 skips the fetch in that case, so a mirror must run that exact command itself before the count. A non-mirror run and a mirror's own `+refs/*:refs/*` refspec both receive the `refs/pull/*` refs the remote advertises. GitHub advertises `refs/pull/*`. `--prune` removes a local ref the remote did not advertise, including a local `refs/pull/*`. The same fetch also removes `refs/remotes/origin/*`. The lease does not use those remote-tracking refs. Step 7 puts them back so the fresh-clone check can pass. Do not fetch pull refs with another refspec and then run a shorter fetch. That shorter fetch prunes a local `refs/pull/*` the remote did not advertise. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect.
 
 6. Record `git rev-list --all --count` after that fetch and before the rewrite. The verify step compares against this number. A count taken before that fetch is the wrong baseline.
-7. Put the exact text in one file outside every repository, mode `0600`. One secret per line when there are several. Do not put that text in a shell command, a commit message, an issue, a pull request, or a support request. The rest of this page calls that file the needle file.
+7. After that count, and before `git filter-repo`, set each remote-tracking branch to the same commit as the local branch. The fetch in step 5 deletes `refs/remotes/origin/*`. On a non-bare clone, git-filter-repo 2.47.0 then stops before any rewrite, because `refs/heads/<branch>` exists and `refs/remotes/origin/<branch>` does not. For every local branch, with no `--force`:
+
+```bash
+git for-each-ref --format='%(refname:lstrip=2)' refs/heads | while read -r branch; do
+  git update-ref "refs/remotes/origin/${branch}" "refs/heads/${branch}"
+done
+```
+
+Do not pass `--force` to `git update-ref` or to `git filter-repo`. The tool's own fetch may prune `refs/remotes/origin/*` again after that check. A bare mirror skips this check. The clone in step 3 is not a mirror, so this restore is required there.
+8. Put the exact text in one file outside every repository, mode `0600`. One secret per line when there are several. Do not put that text in a shell command, a commit message, an issue, a pull request, or a support request. The rest of this page calls that file the needle file.
 
 ## Find it without printing it
 
@@ -134,7 +143,7 @@ The counter needs Python 3.9 or newer. For `all` and `reachable`, stdout is a si
 
 ## Rewrite
 
-From the fresh clone, pass `--no-gc` so the old objects survive the diff in the next section:
+From the fresh clone, after step 7, pass `--no-gc` so the old objects survive the diff in the next section. Do not pass `--force`:
 
 ```bash
 git filter-repo --sensitive-data-removal --no-gc --replace-text /path/to/needle-file
