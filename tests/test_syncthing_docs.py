@@ -41,7 +41,6 @@ _REMOVED_UNSAFE_RULES = (
     "A sole `~/Shared/FreeTube/<name>.db~` becomes",
     "run temp-normalization",
     "leave the folder paused",
-    "PATCH /rest/config/folders/groundwork-shared",
     "delete only the sibling `name.db~`",
     "The same-directory rename runs only when",
     "move and symlink every regular file whose shared path is absent, then stop",
@@ -257,6 +256,9 @@ class SyncthingDocsTest(unittest.TestCase):
         for phrase in _REMOVED_UNSAFE_RULES:
             with self.subTest(removed=phrase):
                 self.assertNotIn(phrase, text)
+        self.assertEqual(text.count("PATCH /rest/config/folders/groundwork-shared"), 2)
+        freetube = text.split("## FreeTube", 1)[1]
+        self.assertNotIn("PATCH /rest/config/folders/groundwork-shared", freetube)
         self.assertNotIn("compacted successor", text)
         self.assertNotIn("keep the newer", text)
         self.assertLess(text.index("compare its path"), text.index("already in `folder.devices`"))
@@ -271,6 +273,11 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("replaces the symlink", decision)
         self.assertNotIn("moves the compacted file back", decision)
         self.assertIn("The cheatsheet says Quit, not close the window.", decision)
+        self.assertIn(
+            "An index reset of `groundwork-shared` pauses that folder first and resumes it afterwards.",
+            decision,
+        )
+        self.assertIn("The wrapper still never pauses it.", decision)
 
     def test_kernel_lock_quit_and_gui_socket(self) -> None:
         text = DEFINITION.read_text()
@@ -317,6 +324,12 @@ class SyncthingDocsTest(unittest.TestCase):
             "A later apply uses the same per-name rule.",
             "POST /rest/db/revert",
             "POST /rest/system/reset?folder=groundwork-shared",
+            "must be paused before `POST /rest/system/reset?folder=groundwork-shared`",
+            "folder must be paused when resetting",
+            "pause Shared in the GUI",
+            "resume it on every exit path",
+            "If the folder is not paused yet, do not reset and do not resume.",
+            "The only pause of `groundwork-shared` is the index reset above.",
             "Do not announce those entries as deletions.",
         ):
             with self.subTest(phrase=phrase):
