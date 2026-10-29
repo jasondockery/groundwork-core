@@ -83,4 +83,4 @@ Helium is a Chromium fork aimed at removing more of the upstream browser. It doe
 
 ## Migration
 
-Detect and offer, never force. Prompts default to no. Non-interactive runs and `update-all` print one line. The [browser contract](../browser.md) has the preferred command for each OS. Profile data stays until the person imports it with Brave's importer.
+Detect and offer, never force. Prompts default to no. Non-interactive runs and `update-all` print one line. The [browser contract](../browser.md) has the preferred command for each OS. Bookmarks, history, and extensions stay until the person imports them with Brave's importer. Passwords stay in Bitwarden, the only extension Groundwork offers. `PasswordManagerEnabled` is false when Bitwarden is the password manager.
