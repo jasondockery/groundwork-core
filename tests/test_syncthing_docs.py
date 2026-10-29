@@ -41,7 +41,6 @@ _REMOVED_UNSAFE_RULES = (
     "A sole `~/Shared/FreeTube/<name>.db~` becomes",
     "run temp-normalization",
     "leave the folder paused",
-    "PATCH /rest/config/folders/groundwork-shared",
     "delete only the sibling `name.db~`",
     "The same-directory rename runs only when",
     "move and symlink every regular file whose shared path is absent, then stop",
@@ -257,6 +256,9 @@ class SyncthingDocsTest(unittest.TestCase):
         for phrase in _REMOVED_UNSAFE_RULES:
             with self.subTest(removed=phrase):
                 self.assertNotIn(phrase, text)
+        self.assertEqual(text.count("PATCH /rest/config/folders/groundwork-shared"), 2)
+        freetube = text.split("## FreeTube", 1)[1]
+        self.assertNotIn("PATCH /rest/config/folders/groundwork-shared", freetube)
         self.assertNotIn("compacted successor", text)
         self.assertNotIn("keep the newer", text)
         self.assertLess(text.index("compare its path"), text.index("already in `folder.devices`"))
@@ -271,6 +273,27 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("replaces the symlink", decision)
         self.assertNotIn("moves the compacted file back", decision)
         self.assertIn("The cheatsheet says Quit, not close the window.", decision)
+        self.assertIn(
+            "An index reset of `groundwork-shared` pauses that folder first.",
+            decision,
+        )
+        self.assertIn(
+            "The unpause waits until a probe fails and the new API answers, then retries.",
+            decision,
+        )
+        self.assertIn(
+            "After a sample has been `scanning` or `scan-waiting` and the latest sample is `idle`, the FreeTube browse must be empty.",
+            decision,
+        )
+        self.assertIn(
+            "A paused folder's `state` is `\"\"`.",
+            decision,
+        )
+        self.assertIn(
+            "A lost response resumes the same process when `startTime` is unchanged.",
+            decision,
+        )
+        self.assertIn("The wrapper still never pauses it.", decision)
 
     def test_kernel_lock_quit_and_gui_socket(self) -> None:
         text = DEFINITION.read_text()
@@ -317,6 +340,25 @@ class SyncthingDocsTest(unittest.TestCase):
             "A later apply uses the same per-name rule.",
             "POST /rest/db/revert",
             "POST /rest/system/reset?folder=groundwork-shared",
+            "must be paused before `POST /rest/system/reset?folder=groundwork-shared`",
+            "folder must be paused when resetting",
+            "drops that folder's index and does not scan",
+            "pause Shared in the GUI",
+            "Do not resume when the reset response returns.",
+            "wait until a probe fails because the old process is gone",
+            "GET /rest/system/ping",
+            "Then wait until the API answers again.",
+            'Only then retry `PATCH /rest/config/folders/groundwork-shared` with only `{"paused": false}` until the new process accepts it.',
+            "Resume the current process when the POST returned an error and that process never exited.",
+            "Record `startTime` from `GET /rest/system/status` before the POST.",
+            "The same `startTime`, with ping still succeeding, means this process never exited: resume it.",
+            "A different `startTime` is the new process: unpause that process after `GET /rest/system/ping` answers.",
+            "until a sample has been `scanning` or `scan-waiting` and the latest sample is `idle`",
+            'A paused folder has no runner, so `state` is `""`.',
+            "The scan that skips `FreeTube` runs when that unpaused folder starts.",
+            "require `GET /rest/db/browse?folder=groundwork-shared&prefix=FreeTube` to be empty",
+            "If the folder is not paused yet, do not reset and do not resume.",
+            "The only pause of `groundwork-shared` is the index reset above.",
             "Do not announce those entries as deletions.",
         ):
             with self.subTest(phrase=phrase):
@@ -324,6 +366,9 @@ class SyncthingDocsTest(unittest.TestCase):
         for phrase in _REMOVED_UNSAFE_RULES:
             with self.subTest(removed=phrase):
                 self.assertNotIn(phrase, text)
+        self.assertNotIn("a lost response is not that case", text)
+        self.assertNotIn("until `state` has left `idle` and returned to `idle`", text)
+        self.assertNotIn("state is still `idle`", text)
         self.assertNotIn("Close it and wait", text)
         self.assertNotIn("If the shared file is absent, do not launch.", text)
         self.assertNotIn("replaces the address in config", text)
