@@ -278,7 +278,11 @@ class SyncthingDocsTest(unittest.TestCase):
             decision,
         )
         self.assertIn(
-            "the unpause is retried on the new process after the API answers",
+            "The unpause waits until a probe fails and the new API answers, then retries.",
+            decision,
+        )
+        self.assertIn(
+            "After `state` leaves `idle` and returns to `idle`, the FreeTube browse must be empty.",
             decision,
         )
         self.assertIn("The wrapper still never pauses it.", decision)
@@ -333,12 +337,16 @@ class SyncthingDocsTest(unittest.TestCase):
             "drops that folder's index and does not scan",
             "pause Shared in the GUI",
             "Do not resume when the reset response returns.",
-            "Wait until the API answers again.",
-            'Retry `PATCH /rest/config/folders/groundwork-shared` with only `{"paused": false}` until the new process accepts it.',
+            "wait until a probe fails because the old process is gone",
+            "GET /rest/system/ping",
+            "Then wait until the API answers again.",
+            'Only then retry `PATCH /rest/config/folders/groundwork-shared` with only `{"paused": false}` until the new process accepts it.',
+            "Resume the current process only when the POST returned an error and that process never exited.",
+            "a lost response is not that case",
+            "until `state` has left `idle` and returned to `idle`",
             "The scan that skips `FreeTube` runs when that unpaused folder starts.",
             "require `GET /rest/db/browse?folder=groundwork-shared&prefix=FreeTube` to be empty",
             "If the folder is not paused yet, do not reset and do not resume.",
-            "A failed reset leaves the same process running.",
             "The only pause of `groundwork-shared` is the index reset above.",
             "Do not announce those entries as deletions.",
         ):

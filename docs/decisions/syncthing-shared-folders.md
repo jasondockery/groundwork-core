@@ -12,7 +12,7 @@ Reviewed on 2026-10-24 against the [Syncthing configuration reference](https://d
 
 Syncthing, carried over the existing personal Tailscale tailnet, is how Groundwork shares files across machines. Every `groundwork-mac`, `groundwork-linux`, `groundwork-windows`, and `groundwork-omarchy-mac-arm64` machine installs it and enables it as a user service. It is a default. It is not an opt-in extra.
 
-The shared folder is `~/Shared` (`groundwork-shared`). FreeTube's database files live at `~/Shared/FreeTube` and are a second Syncthing folder, `groundwork-freetube`, with trash-can versioning. The wrapper never pauses `~/Shared`. An index reset of `groundwork-shared` pauses that folder first. A successful reset restarts Syncthing, and the unpause is retried on the new process after the API answers. The scan runs when the folder is unpaused. The wrapper still never pauses it. The Omarchy M1 mini (Asahi, aarch64, 16 KiB pages) is the always-on peer, so a laptop still has somewhere to sync when other desktops are asleep.
+The shared folder is `~/Shared` (`groundwork-shared`). FreeTube's database files live at `~/Shared/FreeTube` and are a second Syncthing folder, `groundwork-freetube`, with trash-can versioning. The wrapper never pauses `~/Shared`. An index reset of `groundwork-shared` pauses that folder first. A successful reset restarts Syncthing. The unpause waits until a probe fails and the new API answers, then retries. After `state` leaves `idle` and returns to `idle`, the FreeTube browse must be empty. The scan runs when the folder is unpaused. The wrapper still never pauses it. The Omarchy M1 mini (Asahi, aarch64, 16 KiB pages) is the always-on peer, so a laptop still has somewhere to sync when other desktops are asleep.
 
 ## Why Syncthing
 
