@@ -34,6 +34,12 @@ REQUIRED = (
     "mode `0600`",
     "Do not pass `--no-fetch`.",
     "delete the clone and clone again",
+    "remote.origin.mirror",
+    "--force-with-lease=refs/heads/main:<recorded-sha>",
+    "--force-with-lease=refs/tags/v1.2.3:<recorded-sha>",
+    "A count taken before the pull-ref fetch is the wrong baseline.",
+    'b"tree"',
+    "This page does not use that form.",
 )
 
 
@@ -124,6 +130,44 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             )
             self.assertNotEqual(leftover.stdout.strip(), "0")
             self.assertNotIn("secret-token-value", leftover.stdout)
+
+    def test_counter_finds_a_filename_only_needle_in_both_modes(self) -> None:
+        script = _script()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            needle = root / "needle.txt"
+            needle.write_bytes(b"secret-token-value\n")
+            os.chmod(needle, 0o600)
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@example.com",
+            }
+
+            def git(*args: str) -> None:
+                subprocess.run(["git", *args], cwd=repo, check=True, env=env, capture_output=True)
+
+            git("init", "-b", "main")
+            (repo / "secret-token-value.txt").write_text("clean\n", encoding="utf-8")
+            git("add", "secret-token-value.txt")
+            git("commit", "-m", "add a path")
+            counter = root / "count.py"
+            counter.write_text(script, encoding="utf-8")
+            for mode in ("all", "reachable"):
+                result = subprocess.run(
+                    ["python3", str(counter), mode, str(needle)],
+                    cwd=repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.stdout.strip(), "1")
+                self.assertNotIn("secret-token-value", result.stdout)
+                self.assertNotIn("secret-token-value", result.stderr)
 
 
 if __name__ == "__main__":

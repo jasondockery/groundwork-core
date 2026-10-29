@@ -35,15 +35,16 @@ Run `git filter-repo` only in a fresh clone made for this purge. It changes comm
 1. Tell every person and every agent with a clone to stop pushing. A push of the old history after the rewrite puts the text back.
 2. Write down the branch protection or ruleset that blocks a force-push. You will lift that block only for the publish step, then put the same settings back.
 3. Make a fresh clone. Do not rewrite the daily checkout. `git filter-repo --sensitive-data-removal` fetches refs beyond branches and tags, including pull-request refs, and that fetch can drop unpushed commits. Do not pass `--no-fetch`.
-4. A mirror clone (`git clone --mirror`) has the refs the server advertises. GitHub does not advertise `refs/pull/*` to that clone. The `--sensitive-data-removal` fetch is what brings those refs in. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect. If it does not, fetch `+refs/pull/*:refs/pull/*` into this fresh clone before you rewrite.
-5. Put the exact text in one file outside every repository, mode `0600`. One secret per line when there are several. Do not put that text in a shell command, a commit message, an issue, a pull request, or a support request. The rest of this page calls that file the needle file.
+4. Fetch `+refs/pull/*:refs/pull/*` into this fresh clone before you scan or count. A mirror clone (`git clone --mirror`) must run that fetch itself. git-filter-repo 2.47.0 skips `git fetch origin +refs/*:refs/*` when `remote.origin.mirror` is true, so `--sensitive-data-removal` does not bring `refs/pull/*` into a mirror. GitHub does not advertise those refs to the clone. On a clone that is not a mirror, also fetch `origin +refs/*:refs/*` before you record the commit count. That is the same fetch the tool runs inside the rewrite. Before you trust the scan, `git show-ref` should list the `refs/pull/` tips you expect.
+5. Record `git rev-list --all --count` after that fetch and before the rewrite. The verify step compares against this number. A count taken before the pull-ref fetch is the wrong baseline.
+6. Put the exact text in one file outside every repository, mode `0600`. One secret per line when there are several. Do not put that text in a shell command, a commit message, an issue, a pull request, or a support request. The rest of this page calls that file the needle file.
 
 ## Find it without printing it
 
 Search these places. The commands print a count or a ref name, not the text.
 
 - Every branch tip and every tag tip: `git for-each-ref refs/heads refs/tags`.
-- Every object in the database, including objects no ref points at: `git cat-file --batch-all-objects`, fed to the counter below. Run this before the rewrite. A count of zero means the needle file does not match the stored bytes. Fix the file or stop. Do not rewrite on a guess.
+- Every object in the database, including objects no ref points at: `git cat-file --batch-all-objects`, fed to the counter below. The counter reads blobs, commits, tags, and trees. A filename is stored in a tree, so a secret that appears only as a path is a hit. Run this before the rewrite. A count of zero means the needle file does not match those stored bytes. Fix the file or stop. Do not rewrite on a guess.
 - Reachable objects only, after the rewrite: the same counter with `reachable`. This is the gate. The all-object scan still sees the pre-rewrite objects until you prune, so it is the wrong gate after the rewrite.
 - GitHub text the rewrite will not change: issues, pull requests, review comments, release descriptions, and the repository description. The owner runs that search. Record hit or miss for each surface. Do not paste the text into the record.
 
@@ -68,7 +69,7 @@ def objects():
         ).stdout.splitlines()
         for line in listing:
             oid, kind, size = line.split()
-            if kind in {b"blob", b"commit", b"tag"} and int(size) >= min(len(item) for item in needles):
+            if kind in {b"blob", b"commit", b"tag", b"tree"} and int(size) >= min(len(item) for item in needles):
                 yield oid
         return
     commits = subprocess.run(
@@ -127,19 +128,41 @@ Add `--replace-message /path/to/needle-file` when a commit or tag message can co
 Stop when a check fails. Delete the fresh clone if you want to start over. The daily checkout is still the old history, which is what you have until you publish.
 
 1. Reachable hits are zero. Run the counter in `reachable` mode. It must print `0`.
-2. The commit count is unchanged when the rewrite only replaces text. Compare `git rev-list --all --count` from before and after. A different count means a commit was dropped or a ref was missing. Do not push.
+2. The commit count matches the number recorded after the pull-ref fetch and before the rewrite. Compare `git rev-list --all --count` to that number. A count taken before the pull-ref fetch is the wrong baseline. On a clone that is not a mirror, `--sensitive-data-removal` fetches `+refs/*:refs/*` inside the rewrite, so that earlier count rises when pull-request commits are added even though the rewrite only replaced text. A different count from the recorded baseline means a commit was dropped or a ref was missing. Do not push.
 3. Each tip tree differs only in the replaced lines. `.git/filter-repo/commit-map` maps old commits to new ones. Pair each old tip with its new tip and run `git diff-tree -r` on that pair. The old objects are still in this clone until you prune, so the diff works here. Read it on this machine. It shows the removed text. Do not copy it into an issue, a commit, or a ticket. Any other change is a stop.
 4. Count moved pull-request refs with `grep -c '^refs/pull/.*/head$' .git/filter-repo/changed-refs`. Keep the first changed commit SHAs from the tool's `NOTE: First Changed Commit(s)` line. Later notes use those SHAs and that count. They do not use the text.
 
 ## Publish
 
-Re-add `origin` only on this rewritten clone, and only for this push. Fetch before you push. If any branch or tag on the remote moved after the freeze, stop. Someone pushed. Do not overwrite that work.
+At the freeze, before the rewrite, record every remote branch SHA and every remote tag SHA you will replace:
 
-Push each rewritten branch and each rewritten tag with `--force-with-lease`, for example `git push --force-with-lease origin main` and `git push --force-with-lease origin tag v1.2.3`. Repeat for every rewritten ref. Lease fails when the remote ref is not the one you just fetched. That failure is a stop. Do not switch that ref to `--force` unless the owner has seen which ref moved and approves that one ref.
+```bash
+git ls-remote origin 'refs/heads/*' 'refs/tags/*'
+```
+
+Keep that list outside the clone. It is the freeze record.
+
+Re-add `origin` only on this rewritten clone, and only for this push. Run `git ls-remote` again for the same refs. Every SHA must still match the freeze record. If one does not, stop. Someone pushed. Do not overwrite that work.
+
+A fetch followed by `git push --force-with-lease origin main` does not check the freeze record. The fetch moves the remote-tracking ref to the new tip, and the unqualified lease then accepts that tip. That push can replace a commit that arrived after the freeze. This page does not use that form.
+
+Push each rewritten branch with the SHA from the freeze record:
+
+```bash
+git push --force-with-lease=refs/heads/main:<recorded-sha> origin refs/heads/main
+```
+
+Push each rewritten tag the same way. `git push --force-with-lease origin tag v1.2.3` fails with stale info whether or not the tag moved, because a tag has no remote-tracking lease, and the tag stays on the old history. Use the recorded SHA:
+
+```bash
+git push --force-with-lease=refs/tags/v1.2.3:<recorded-sha> origin refs/tags/v1.2.3
+```
+
+Repeat for every rewritten ref, with that ref's name and its recorded SHA. The lease fails when the remote ref is not the recorded SHA. That failure is a stop. Do not switch that ref to `--force` unless the owner has seen which ref moved and approves that one ref.
 
 GitHub's guide shows `git push --force --mirror origin`. This page does not use that form. A mirror push deletes a remote ref that the local clone does not have, including a branch created during the freeze, and a bare `--force` does not check that the remote is still the ref you rewrote.
 
-Pushes of `refs/pull/*` are rejected. That rejection is expected, because GitHub marks those refs read-only. Any other rejection is branch protection. Lift only the protection you wrote down, push that ref again with `--force-with-lease`, and put the same protection back before you do anything else. When the only remaining failures are `refs/pull/*`, the protection is already restored.
+Pushes of `refs/pull/*` are rejected. That rejection is expected, because GitHub marks those refs read-only. Any other rejection is branch protection. Lift only the protection you wrote down, push that ref again with `--force-with-lease=<ref>:<recorded-sha>`, and put the same protection back before you do anything else. When the only remaining failures are `refs/pull/*`, the protection is already restored.
 
 A moved tag changes the commit a release points at. Open each release and confirm the tag still names the release you expect. If the GitHub-text search was a hit on a release description, edit that description. The rewrite does not.
 
