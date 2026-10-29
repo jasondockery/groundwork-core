@@ -29,6 +29,7 @@ REQUIRED = (
     "docs/worktrees.html",
     "Status: proposed",
     "groundwork-core#13",
+    "This change does not open those issues.",
 )
 
 

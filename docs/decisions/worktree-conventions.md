@@ -67,7 +67,7 @@ Checked on 2026-10-29:
 
 ## Follow-ups, each its own issue
 
-These stay unfiled until the owner opens them.
+Issue #13 asked for one issue per proposed change. This change does not open those issues. The owner files them.
 
 1. In `groundwork-mac`, add `~/worktrees` as a `groundwork-repos` root so supervision sees manual lanes. The code-directory root does not include that path.
 2. Add `.worktreeinclude` or `.cursor/worktrees.json` in a repository only when that repository has ignored files a new worktree must copy. This docs repo has none.
