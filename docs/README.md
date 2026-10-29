@@ -1,6 +1,6 @@
 # Shared docs
 
-Current shared operational guidance lives in [AI tools and remote access](ai-tools-and-remote-access.md), [local model workflows](local-models.md), [Tailscale](tailscale.md), [Syncthing shared folders](syncthing.md), and [History purge](history-purge.md). The [Syncthing decision](decisions/syncthing-shared-folders.md) records why that default was chosen. The [worktree decision](decisions/worktree-conventions.md) records where manual agent lanes live. Each environment repo adds its own install and OS-specific steps. Keep shared security policy here, referenced rather than copied.
+Current shared operational guidance lives in [AI tools and remote access](ai-tools-and-remote-access.md), [local model workflows](local-models.md), [Tailscale](tailscale.md), [Syncthing shared folders](syncthing.md), [History purge](history-purge.md), and [Brave](browser.md). The [Syncthing decision](decisions/syncthing-shared-folders.md) records why that default was chosen. The [Brave decision](decisions/default-browser-brave.md) records why Brave is the default browser. The [worktree decision](decisions/worktree-conventions.md) records where manual agent lanes live. Each environment repo adds its own install and OS-specific steps. Keep shared security policy here, referenced rather than copied.
 
 The learning curriculum stays at the original [Groundwork site](https://jasondockery.github.io/groundwork/) for now. The imported HTML pages below are historical reference from the initial split, not the current learner navigation.
 

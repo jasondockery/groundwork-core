@@ -1,0 +1,71 @@
+{
+    "schemaVersion": 1,
+    "default": {
+        "id": "brave",
+        "channel": "release",
+        "desktopIds": {
+            "linux": "brave-browser.desktop",
+            "macos": "com.brave.Browser"
+        }
+    },
+    "policies": [
+        {
+            "name": "BraveRewardsDisabled",
+            "value": true,
+            "upstreamDefault": false,
+            "reason": "Ads-for-crypto program; not used. Removes the Rewards prompts."
+        },
+        {
+            "name": "BraveWalletDisabled",
+            "value": true,
+            "upstreamDefault": false,
+            "reason": "Crypto wallet and web3/decentralized DNS are not used; smaller attack surface."
+        },
+        {
+            "name": "BraveVPNDisabled",
+            "value": true,
+            "upstreamDefault": false,
+            "reason": "Paid VPN upsell; Tailscale is the family's network path."
+        },
+        {
+            "name": "BraveAIChatEnabled",
+            "value": false,
+            "upstreamDefault": true,
+            "reason": "Jason uses separate AI tools; Leo's sidebar and prompts are redundant."
+        },
+        {
+            "name": "BraveP3AEnabled",
+            "value": false,
+            "upstreamDefault": true,
+            "reason": "Privacy: no product analytics."
+        },
+        {
+            "name": "BraveStatsPingEnabled",
+            "value": false,
+            "upstreamDefault": true,
+            "reason": "Privacy: no daily usage ping. Browser updates do not use this ping."
+        },
+        {
+            "name": "PasswordManagerEnabled",
+            "value": false,
+            "upstreamDefault": true,
+            "when": "Bitwarden is the password manager.",
+            "reason": "The built-in password manager does not compete with Bitwarden. Same rule Groundwork used for Chrome."
+        }
+    ],
+    "extensions": [
+        {
+            "name": "Bitwarden",
+            "id": "nngceckbapebfimnlniiiahkandclblb",
+            "updateUrl": "https://clients2.google.com/service/update2/crx",
+            "install": "offer",
+            "reason": "The only extension Groundwork offers, on every OS."
+        }
+    ],
+    "notes": [
+        {
+            "offered": false,
+            "reason": "Jason decided on 2026-10-29 to stick with Bitwarden only. No AI or other extensions are offered."
+        }
+    ]
+}

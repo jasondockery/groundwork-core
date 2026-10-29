@@ -40,6 +40,7 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 - [`docs/tailscale.md`](docs/tailscale.md), the common tailnet security and connection guide referenced by each environment
 - [`docs/syncthing.md`](docs/syncthing.md), the shared-folder default (Syncthing over the tailnet, `~/Shared`, FreeTube's database files) and [`docs/decisions/syncthing-shared-folders.md`](docs/decisions/syncthing-shared-folders.md), the decision record
 - [`docs/history-purge.md`](docs/history-purge.md), the opt-in history purge. Environment repos link it and do not copy it.
+- [`browser/`](browser/README.md), the shared Brave default: policy overrides and Bitwarden, the only offered extension. The contract is [`docs/browser.md`](docs/browser.md). The decision is [`docs/decisions/default-browser-brave.md`](docs/decisions/default-browser-brave.md). Environment repos install the browser.
 - [`docs/decisions/worktree-conventions.md`](docs/decisions/worktree-conventions.md), where manual agent worktrees live, how they are named, and how they are removed after merge
 - [`docs/migrating-from-groundwork.md`](docs/migrating-from-groundwork.md), migration for existing macOS, Linux, and Windows/WSL2 users while the old repo remains available
 
