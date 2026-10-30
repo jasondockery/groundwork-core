@@ -34,7 +34,7 @@ The apt, dnf, and zypper repository files and keys are the ones on [brave.com/li
 
 ## Setting the default
 
-Set the default only after the person confirms. macOS and Windows ask in the operating system as well. On Linux, Groundwork still asks, because the OS will not.
+Set the default only after the person confirms. macOS and Windows ask in the operating system as well. On Linux, Groundwork still asks, because the OS will not. Omarchy is the one exception, described below the table.
 
 | OS | After confirmation |
 | --- | --- |
@@ -43,7 +43,9 @@ Set the default only after the person confirms. macOS and Windows ask in the ope
 | Linux, except Omarchy | `xdg-settings set default-web-browser brave-browser.desktop` |
 | Omarchy | `omarchy-default-browser brave` |
 
-`omarchy-default-browser` with no argument prints the current default. Its examples also show `omarchy default browser brave`. Either form is the Omarchy command. It is still offered, not run, until the person says yes.
+`omarchy-default-browser` with no argument prints the current default. Its examples also show `omarchy default browser brave`. Either form is the Omarchy command.
+
+On Omarchy, Jason decided on 2026-10-30 to make the full switch to Brave. The first time a Brave build passes the environment's launch check on that machine, and the default is still Chromium, setup runs `omarchy default browser brave` once, without asking. It prints one line saying so and how to switch back: `omarchy default browser chromium`. A default the person changes later is never overridden. A saved decline is respected. A default other than Chromium only gets an offer, and that offer waits for a yes. macOS, Windows, and Linux other than Omarchy keep the confirm-first rule.
 
 ## Policies and extensions
 
