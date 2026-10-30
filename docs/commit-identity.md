@@ -37,6 +37,13 @@ the identity git would record. `commit-identity-guard.sh pre-push "$@"` as the
 on that remote. `commit-identity-guard.sh doctor` verifies the settings below
 where they can be read.
 
+Pushing straight to a URL, such as `git push https://example.com/repo.git main`,
+gives the hook no remote name. Git has no remote-tracking refs for a bare URL,
+so a new ref there checks all reachable history, and an old commit that matches
+the denylist or carries a co-author trailer blocks every such push. Push to a
+named remote instead (`git remote add origin <url>`, then `git push origin`),
+which checks only commits not already on that remote.
+
 ## Agent attribution settings
 
 Turn attribution off at the source and let the hooks be the backstop.
