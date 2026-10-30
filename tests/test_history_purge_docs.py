@@ -56,6 +56,13 @@ REQUIRED = (
     "GitHub advertises `refs/pull/*`.",
     "kinds",
     "git filter-repo -h",
+    "## Tool contract for environment repos",
+    "Per-user: it installs into the user's home, with no root",
+    "pipx install git-filter-repo",
+    "brew install git-filter-repo",
+    "mise use -g pipx:git-filter-repo",
+    "explicit confirmation for each repository",
+    "its owner's job",
     "Stop unless the help text contains `--sensitive-data-removal`.",
     "A missing command is the same stop.",
     "Do not compare `git filter-repo --version` to `2.47`.",
@@ -65,6 +72,26 @@ REQUIRED = (
     "expected freshly packed repo",
     "`git rev-list --all --count` is the same after that repack as it was before it.",
 )
+
+
+def _filter_repo_skip_reason() -> str | None:
+    """Return why the git-filter-repo tests cannot run, or None when they can."""
+    try:
+        run = subprocess.run(
+            ["git", "filter-repo", "-h"], capture_output=True, text=True
+        )
+    except OSError as error:
+        return f"git is unavailable ({error})"
+    if "--sensitive-data-removal" in run.stdout + run.stderr:
+        return None
+    return (
+        "git-filter-repo 2.47 or newer (with --sensitive-data-removal) is not "
+        "installed; it is an opt-in tool, see docs/history-purge.md"
+    )
+
+
+_SKIP_REASON = _filter_repo_skip_reason()
+needs_filter_repo = unittest.skipIf(_SKIP_REASON is not None, _SKIP_REASON or "")
 
 
 def _script() -> str:
@@ -261,6 +288,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertEqual(kinds.stderr, "")
             self.assertNotIn("secret-token-value", kinds.stdout)
 
+    @needs_filter_repo
     def test_restore_remote_tracking_refs_lets_filter_repo_start(self) -> None:
         text = PAGE.read_text()
         restore = next(
@@ -349,6 +377,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertIn("New history written", started.stdout)
             self.assertNotIn("--force", restore)
 
+    @needs_filter_repo
     def test_repack_after_pull_fetch_lets_filter_repo_start(self) -> None:
         text = PAGE.read_text()
         restore = next(

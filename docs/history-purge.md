@@ -16,6 +16,29 @@ The per-user command in the 2.47.0 install notes is `pipx install git-filter-rep
 
 Try the check on a terminal: run `git filter-repo -h`. Stop unless the help text contains `--sensitive-data-removal`. A missing command is the same stop. Do not practice a rewrite on a repository you use.
 
+## Tool contract for environment repos
+
+An environment repo that offers the tool follows `skills/developer-tool-change/SKILL.md`. The contract is data for that repo to implement. This repository ships no installer.
+
+- Purpose-aware: the tool is optional and tied to this one purpose. It is not in any default package list, shell profile, or bootstrap path.
+- Per-user: it installs into the user's home, with no root and no administrator prompt. A system package manager that needs root is not the default route, even where it carries the package.
+- Ask first: an agent runs the check below, tells the owner the tool is missing, and installs only after the owner says yes for that machine.
+- Proof: after install, `git filter-repo -h` prints `--sensitive-data-removal`. An older build fails the contract even when the command exists.
+- Removal: the environment repo documents how to uninstall it, for example `pipx uninstall git-filter-repo`.
+
+Install lines, as data. Each row is the per-user line first, then the package line that an environment may use only where it needs no root. The environment repo chooses and implements one.
+
+| Environment | Per-user line | Package line | Needs root |
+|---|---|---|---|
+| macOS | `pipx install git-filter-repo` | `brew install git-filter-repo` | no |
+| Linux and WSL (Homebrew on Linux) | `pipx install git-filter-repo` | `brew install git-filter-repo` | no |
+| Linux and WSL (distro package) | `pipx install git-filter-repo` | `apt install git-filter-repo` | yes, so not the default |
+| Omarchy (Arch) | `pipx install git-filter-repo` | `pacman -S git-filter-repo` | yes, so not the default |
+| Windows | `pipx install git-filter-repo` | none declared | not applicable |
+| Any, with mise | `mise use -g pipx:git-filter-repo` | none | no |
+
+`pipx` itself must already be present per-user. Providing it is the environment repo's job. Distro packages can be older than 2.47, so the proof line decides, not the package name.
+
 ## Rotate first
 
 If the text is a password, token, or key, revoke or rotate it before any rewrite. After rotation, the old value cannot be used. GitHub does not purge history when rotation is enough. A rewrite does not expire a live credential.
@@ -186,6 +209,8 @@ Run `git ls-remote origin 'refs/heads/*' 'refs/tags/*'` again. Compare it with t
 
 A fetch followed by `git push --force-with-lease origin main` does not check the freeze record. The fetch moves the remote-tracking ref to the new tip, and the unqualified lease then accepts that tip. That push can replace a commit that arrived after the freeze. This page does not use that form.
 
+Force-push needs the owner's explicit confirmation for each repository, given after the verify step passes. A yes for one repository is not a yes for another, and an earlier yes does not carry over to a second push. An agent stops here and asks.
+
 Push each rewritten branch with the SHA from the freeze record:
 
 ```bash
@@ -207,6 +232,8 @@ A moved tag changes the commit a release points at. Open each release and confir
 ## GitHub Support and other clones
 
 Ask GitHub Support to drop the cached views and the pull-request refs. Include the owner and repository name, the pull-request count from `changed-refs`, and the first changed commit SHAs. If LFS objects were orphaned, say so and attach the file the tool named. Never name the purged text in an issue, a commit, or the support request. Support does not purge ordinary data, and it does not purge a credential that rotation already made useless.
+
+Cleaning each other local clone is its owner's job. This procedure does not reach into them, and an agent does not delete or rewrite a clone it did not create for this purge. Tell each owner what to do.
 
 Other clones must not `git pull` and then `git push`. That push puts the old history back. The usual fix is to delete the clone and clone again. A person who still has unpushed commits follows the colleague steps in the git-filter-repo manual: delete local tags, run `git fetch --prune --tags`, rebase onto the new history, then `git reflog expire --expire=now --all` and `git gc --prune=now`. That expire drops every reflog and every stash. Before that clone pushes, `git cat-file -t` on each first-changed SHA must fail. Do not run `git filter-repo` a second time in those clones. A second rewrite can mint different commit ids.
 
