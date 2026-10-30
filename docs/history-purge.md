@@ -8,7 +8,7 @@ Environment repos link this page. They do not copy it.
 
 ## Opt-in tool
 
-`git-filter-repo` is not a Groundwork default. This repository does not install it. An environment repo may declare it as an optional per-user tool. An agent checks for it and asks the owner before any install. The agent does not install it, and does not use administrator permission to install it for this procedure.
+`git-filter-repo` is not a Groundwork default. This repository does not install it. An environment repo may declare it as an optional per-user tool. An agent checks for it and asks the owner before any install. The agent does not install it without that per-machine yes, and never with administrator permission.
 
 The check is `git filter-repo -h`. Stop unless the help text contains `--sensitive-data-removal`. A missing command is the same stop. `--sensitive-data-removal` arrived in 2.47. Repology, read on 2026-10-29, still lists older distro builds, including 2.38 and 2.34, so a package name is not proof the flag is present. Do not compare `git filter-repo --version` to `2.47`. That command prints a hash of the script, not the release number.
 
@@ -22,7 +22,7 @@ An environment repo that offers the tool follows `skills/developer-tool-change/S
 
 - Purpose-aware: the tool is optional and tied to this one purpose. It is not in any default package list, shell profile, or bootstrap path.
 - Per-user: it installs into the user's home, with no root and no administrator prompt. A system package manager that needs root is not the default route, even where it carries the package.
-- Ask first: an agent runs the check below, tells the owner the tool is missing, and installs only after the owner says yes for that machine.
+- Ask first: an agent runs the check below, tells the owner the tool is missing, and installs per-user only after the owner says yes for that machine, never with administrator permission.
 - Proof: after install, `git filter-repo -h` prints `--sensitive-data-removal`. An older build fails the contract even when the command exists.
 - Removal: the environment repo documents how to uninstall it, for example `pipx uninstall git-filter-repo`.
 
@@ -32,7 +32,8 @@ Install lines, as data. Each row is the per-user line first, then the package li
 |---|---|---|---|
 | macOS | `pipx install git-filter-repo` | `brew install git-filter-repo` | no |
 | Linux and WSL (Homebrew on Linux) | `pipx install git-filter-repo` | `brew install git-filter-repo` | no |
-| Linux and WSL (distro package) | `pipx install git-filter-repo` | `apt install git-filter-repo` | yes, so not the default |
+| Debian, Ubuntu, and WSL with apt | `pipx install git-filter-repo` | `apt install git-filter-repo` | yes, so not the default |
+| Fedora | `pipx install git-filter-repo` | `dnf install git-filter-repo` | yes, so not the default |
 | Omarchy (Arch) | `pipx install git-filter-repo` | `pacman -S git-filter-repo` | yes, so not the default |
 | Windows | `pipx install git-filter-repo` | none declared | not applicable |
 | Any, with mise | `mise use -g pipx:git-filter-repo` | none | no |
