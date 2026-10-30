@@ -1,0 +1,8 @@
+# Example only. Copy to ~/.config/groundwork/commit-denylist (or point
+# GROUNDWORK_COMMIT_DENYLIST at a file) and edit it there. Never commit the
+# real file. One case-insensitive substring per line, matched against
+# "Name <email>" of the author and of the committer. Blank lines and lines
+# starting with # are ignored.
+#
+# alt-account
+# example-org
