@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -56,6 +57,16 @@ REQUIRED = (
     "GitHub advertises `refs/pull/*`.",
     "kinds",
     "git filter-repo -h",
+    "## Tool contract for environment repos",
+    "Per-user: it installs into the user's home, with no root",
+    "pipx install git-filter-repo",
+    "brew install git-filter-repo",
+    "mise use -g pipx:git-filter-repo",
+    "explicit confirmation for each repository",
+    "its owner's job",
+    "does not install it without that per-machine yes, and never with administrator permission.",
+    "installs per-user only after the owner says yes for that machine",
+    "dnf install git-filter-repo",
     "Stop unless the help text contains `--sensitive-data-removal`.",
     "A missing command is the same stop.",
     "Do not compare `git filter-repo --version` to `2.47`.",
@@ -64,6 +75,31 @@ REQUIRED = (
     "git repack -ad",
     "expected freshly packed repo",
     "`git rev-list --all --count` is the same after that repack as it was before it.",
+)
+
+
+def _filter_repo_skip_reason() -> str | None:
+    """Return why the git-filter-repo tests cannot run, or None when they can."""
+    try:
+        run = subprocess.run(
+            ["git", "filter-repo", "-h"], capture_output=True, text=True
+        )
+    except OSError as error:
+        return f"git is unavailable ({error})"
+    if "--sensitive-data-removal" in run.stdout + run.stderr:
+        return None
+    return (
+        "git-filter-repo 2.47 or newer (with --sensitive-data-removal) is not "
+        "installed; it is an opt-in tool, see docs/history-purge.md"
+    )
+
+
+_SKIP_REASON = _filter_repo_skip_reason()
+needs_filter_repo = unittest.skipIf(_SKIP_REASON is not None, _SKIP_REASON or "")
+
+
+needs_git = unittest.skipIf(
+    shutil.which("git") is None, "git is not installed; these tests build temporary repositories"
 )
 
 
@@ -105,6 +141,11 @@ class HistoryPurgeDocsTest(unittest.TestCase):
         first_remote = text.index("git ls-remote origin 'refs/heads/*' 'refs/tags/*'")
         self.assertLess(before, first_remote)
         self.assertLess(first_remote, rewrite)
+        verify_at = text.index("## Verify before any push")
+        confirm_at = text.index("Force-push needs the owner's explicit confirmation")
+        lease_at = text.index("```bash\ngit push --force-with-lease=")
+        self.assertLess(verify_at, confirm_at)
+        self.assertLess(confirm_at, lease_at)
         verify = text.split("3. Each tip tree", 1)[1].split("\n4. ", 1)[0]
         self.assertTrue(
             "git diff-tree -r -p" in verify or "git diff-tree -r --patch" in verify,
@@ -124,6 +165,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
                     continue
                 self.assertTrue((source.parent / target).resolve().exists(), target)
 
+    @needs_git
     def test_counter_reports_reachable_hits_without_printing_the_needle(self) -> None:
         script = _script()
         with tempfile.TemporaryDirectory() as tmp:
@@ -210,6 +252,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertEqual(kinds.stderr, "")
             self.assertNotIn("secret-token-value", kinds.stdout)
 
+    @needs_git
     def test_counter_finds_a_filename_only_needle_in_both_modes(self) -> None:
         script = _script()
         with tempfile.TemporaryDirectory() as tmp:
@@ -261,6 +304,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertEqual(kinds.stderr, "")
             self.assertNotIn("secret-token-value", kinds.stdout)
 
+    @needs_filter_repo
     def test_restore_remote_tracking_refs_lets_filter_repo_start(self) -> None:
         text = PAGE.read_text()
         restore = next(
@@ -349,6 +393,7 @@ class HistoryPurgeDocsTest(unittest.TestCase):
             self.assertIn("New history written", started.stdout)
             self.assertNotIn("--force", restore)
 
+    @needs_filter_repo
     def test_repack_after_pull_fetch_lets_filter_repo_start(self) -> None:
         text = PAGE.read_text()
         restore = next(
