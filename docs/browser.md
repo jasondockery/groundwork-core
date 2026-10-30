@@ -10,7 +10,7 @@ Reviewed on 2026-10-29 against Brave's policy templates in [brave-core](https://
 
 The browser is Brave's release channel. It is not Brave Origin. On Linux the desktop id is `brave-browser.desktop`. On macOS the bundle id is `com.brave.Browser`.
 
-Groundwork detects and offers. It never forces. Nothing is uninstalled automatically, and no profile data is deleted. A prompt that would change the default browser, import data, or offer an extension defaults to no. A non-interactive run, and `update-all`, do not ask. They print one line and leave the machine as it is.
+Groundwork makes Brave the default once, automatically, on every OS. Brave becomes the default the first time it is installed and passes that OS's check, and the environment switches the default with the OS's preferred method from the table under "Setting the default". It never overrides a default the person chose later, it respects a saved "no", and when the current default was chosen by the person it only offers. A default was not chosen by the person when it is unset or is the OS's or distribution's shipped default: Safari on macOS, Edge on Windows, Chromium on Omarchy, or the distribution's packaged default browser on other Linux. Nothing is uninstalled automatically, and no profile data is deleted. A prompt to import data or to install an extension defaults to no. A run with no desktop session, such as SSH, cron, or headless, does not change the default or ask. It prints one line and leaves the machine as it is. A run in a desktop session, `update-all` included, may make the one-time switch.
 
 That one line names the preferred method and the exact command in the table below. A Chrome, Chromium, or Brave install from any other source gets the same one line. Brave installed from Flatpak or Snap is a non-preferred source: Brave's Linux page says those packages are not yet working as well as the native packages.
 
@@ -34,16 +34,20 @@ The apt, dnf, and zypper repository files and keys are the ones on [brave.com/li
 
 ## Setting the default
 
-Set the default only after the person confirms. macOS and Windows ask in the operating system as well. On Linux, Groundwork still asks, because the OS will not.
+Jason decided on 2026-10-30 to make the full switch to Brave on every OS. The first time Brave is installed and passes that OS's check, the environment sets the default once, using the method below, and prints one line saying so and how to switch back. Where the OS forces a confirmation, automatic means Groundwork starts the change once and the person confirms it. A default the person changes later is never overridden. A saved decline is respected. When the current default was chosen by the person, meaning it is not unset and not the OS's or distribution's shipped default, Groundwork only offers, and the offer waits for a yes.
 
-| OS | After confirmation |
+| OS | Method |
 | --- | --- |
-| macOS | Homebrew formula `defaultbrowser`. Running it raises macOS's confirmation dialog. The argument is the handler `defaultbrowser` prints for Brave. |
-| Windows | Settings, via `ms-settings:defaultapps`. Windows is where the person confirms. |
+| macOS | Homebrew formula `defaultbrowser`. It returns before the person clicks the confirmation dialog, so Groundwork triggers it once, the person clicks, and Groundwork re-checks the default afterwards. Choosing "Keep Safari" in the dialog counts as done, as a decline, and is never asked again. The argument is the handler `defaultbrowser` prints for Brave. |
+| Windows | Windows does not let programs set the default. Groundwork opens `ms-settings:defaultapps` on Brave's page once, automatically, and the person confirms. It never uses UserChoice-hash workarounds. |
 | Linux, except Omarchy | `xdg-settings set default-web-browser brave-browser.desktop` |
-| Omarchy | `omarchy-default-browser brave` |
+| Omarchy | `omarchy default browser brave`, to switch back `omarchy default browser chromium` |
 
-`omarchy-default-browser` with no argument prints the current default. Its examples also show `omarchy default browser brave`. Either form is the Omarchy command. It is still offered, not run, until the person says yes.
+`omarchy-default-browser` with no argument prints the current default. Its examples also show `omarchy default browser brave`. Either form is the Omarchy command.
+
+With no desktop session, such as SSH or cron, Groundwork does not change the default. It defers to the next run in a desktop session and prints one line saying so.
+
+Each environment records the one-time state, done or declined, in its own per-user state file, for example `%LOCALAPPDATA%\Groundwork\brave-default.json` on Windows. A recorded state is never asked or applied again.
 
 ## Policies and extensions
 
