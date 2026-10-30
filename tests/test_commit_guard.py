@@ -109,6 +109,32 @@ class GuardTest(unittest.TestCase):
     def test_pre_push_delete_ignored(self):
         self.assertEqual(self.push_check("0" * 40, remote="a" * 40).returncode, 0)
 
+    def test_whitespace_denylist_lines_ignored(self):
+        self.deny.write_text("  \n\t\n  alt-account  \n")
+        self.assertEqual(self.msg_check("feat: x\n").returncode, 0)
+        env = dict(self.env, GIT_AUTHOR_NAME="alt-account")
+        self.assertEqual(self.msg_check("feat: x\n", env=env).returncode, 1)
+
+    def test_force_push_over_unfetched_remote_tip(self):
+        t = Path(self.tmp.name)
+        bare = t / "bare.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+        self.git("remote", "add", "origin", str(bare))
+        base = self.commit("base")
+        self.git("push", "-q", "origin", "main")
+        other = t / "other"
+        subprocess.run(["git", "clone", "-q", str(bare), str(other)], env=self.env, check=True)
+        (other / "g").write_text("g")
+        for c in (["add", "g"], ["commit", "-q", "-m", "unfetched"], ["push", "-q", "origin", "main"]):
+            subprocess.run(["git", *c], cwd=other, env=self.env, check=True)
+        rsha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=other, env=self.env,
+                              capture_output=True, text=True).stdout.strip()
+        self.assertNotEqual(self.git("cat-file", "-e", rsha).returncode, 0)
+        bad = self.commit("bad\n\nCo-authored-by: A <a@example.com>")
+        r = self.push_check(bad, remote=rsha)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Co-authored-by", r.stderr)
+
     def test_doctor(self):
         t = Path(self.tmp.name)
         (t / ".claude").mkdir()

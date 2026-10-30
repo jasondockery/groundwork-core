@@ -32,6 +32,8 @@ check_ident() {
   [ -r "$f" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%$'\r'}
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line%"${line##*[![:space:]]}"}
     case "$line" in ''|'#'*) continue ;; esac
     if printf '%s' "$2" | grep -qiF -- "$line"; then
       fail "$1 matches the local denylist ($f)"
@@ -58,12 +60,18 @@ mode_commit_msg() {
 }
 
 mode_pre_push() {
-  local remote=${1:-} lref lsha rref rsha sha rc=0 zero range
-  while read -r lref lsha rref rsha; do
+  local remote=${1:-} lsha rsha sha rc=0 shas
+  while read -r _ lsha _ rsha; do
     case "$lsha" in *[!0]*) ;; *) continue ;; esac   # deleting a ref
-    case "$rsha" in *[!0]*) range="$rsha..$lsha" ;; *) range="$lsha --not --remotes=${remote:-*}" ;; esac
-    # shellcheck disable=SC2086
-    for sha in $(git rev-list $range); do
+    if case "$rsha" in *[!0]*) true ;; *) false ;; esac \
+       && git cat-file -e "$rsha^{commit}" 2>/dev/null; then
+      shas=$(git rev-list "$rsha..$lsha") || { fail "rev-list failed for $rsha..$lsha; refusing push"; rc=1; continue; }
+    else
+      # New ref, or the remote tip is unknown locally (force-push over
+      # commits never fetched): check everything not on a known remote ref.
+      shas=$(git rev-list "$lsha" --not "--remotes=${remote:-*}") || { fail "rev-list failed for $lsha; refusing push"; rc=1; continue; }
+    fi
+    for sha in $shas; do
       check_commit "$sha" || rc=1
     done
   done
@@ -73,10 +81,12 @@ mode_pre_push() {
 mode_doctor() {
   local rc=0 s="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" f
   f=$(denylist_file)
-  [ -r "$f" ] && echo "ok: denylist at $f" || echo "note: no denylist at $f (identity rule inactive)"
-  [ -n "$(git config user.name)" ] && [ -n "$(git config user.email)" ] \
-    && echo "ok: git identity set (Codex and other agents inherit it)" \
-    || { echo "FAIL: git user.name or user.email unset"; rc=1; }
+  if [ -r "$f" ]; then echo "ok: denylist at $f"; else echo "note: no denylist at $f (identity rule inactive)"; fi
+  if [ -n "$(git config user.name)" ] && [ -n "$(git config user.email)" ]; then
+    echo "ok: git identity set (Codex and other agents inherit it)"
+  else
+    echo "FAIL: git user.name or user.email unset"; rc=1
+  fi
   if [ -r "$s" ] && python3 -I -c '
 import json,sys
 a=json.load(open(sys.argv[1])).get("attribution")
