@@ -3,10 +3,13 @@
 Status: accepted
 Date: 2026-10-24
 Issue: [groundwork-core#14](https://github.com/jasondockery/groundwork-core/issues/14)
+Amended: 2026-10-31, [groundwork-core#47](https://github.com/jasondockery/groundwork-core/issues/47), Obsidian vault
 
 The operational contract is [Syncthing shared folders](../syncthing.md). This page records why that contract exists.
 
 Reviewed on 2026-10-24 against the [Syncthing configuration reference](https://docs.syncthing.net/users/config.html), the [FreeTube data-location page](https://docs.freetubeapp.io/usage/data-location/), [FreeTube issue 370](https://github.com/FreeTubeApp/FreeTube/issues/370), FreeTube 0.25.3, the [Dropbox Linux package index](https://linux.dropbox.com/debian/pool/main/), and the [rclone Google Drive client-id notice](https://rclone.org/drive/#making-your-own-client-id).
+
+The Obsidian section was reviewed on 2026-10-31 against Syncthing's [folder types](https://docs.syncthing.net/users/foldertypes.html), [file versioning](https://docs.syncthing.net/users/versioning.html), [ignoring files](https://docs.syncthing.net/users/ignoring.html), [conflicting changes](https://docs.syncthing.net/users/syncing.html), and [configuration](https://docs.syncthing.net/users/config.html); Obsidian's [Sync your notes across devices](https://obsidian.md/help/sync-notes), [Sync settings and selective syncing](https://obsidian.md/help/sync/settings), and [Switch to Obsidian Sync](https://obsidian.md/help/sync/switch); the community [Obsidian Hub Syncthing page](https://publish.obsidian.md/hub/02+-+Community+Expansions/02.05+All+Community+Expansions/Auxiliary+Tools/Syncthing); and the Syncthing forum thread [Problems with .obsidian folder](https://forum.syncthing.net/t/problems-with-obsidian-folder/25397) (2025-10-01 and 2025-10-02 posts).
 
 ## Decision
 
@@ -49,3 +52,37 @@ There is no supported data-directory setting. Chromium's `--user-data-dir` flag 
 NeDB files are append-style. FreeTube assumes it is the only writer. Syncthing will happily sync a file that two running copies append to, and the result is a `*.sync-conflict-*` copy beside the database. FreeTube does not merge those copies. Watching or subscribing on two machines at once can drop history or subscriptions.
 
 Open FreeTube on one machine at a time. Quit FreeTube, and wait until `groundwork-freetube` is up to date, before opening it on another machine. The cheatsheet says Quit, not close the window. Closing the window pauses only that folder, so `~/Shared` keeps syncing. The mini stays on so Syncthing has a peer; FreeTube on the mini is still a writer and follows the same rule. The [shared-folder page](../syncthing.md) has the warning an environment repo can show at launch. A hard lock across machines is the wrong tool: an offline peer would block the machine that is actually in use.
+
+## Obsidian vault
+
+An Obsidian vault is a third folder, `groundwork-obsidian`, so notes reach the Mac, the Omarchy mini, and the other machines without iCloud or a paid sync service. Obsidian's own help names Syncthing as an option and says it works best with one device always on, which is the mini's job here. The [shared-folder page](../syncthing.md#obsidian-vault) is the procedure. Each open point in issue 47 was decided as follows.
+
+### Opt-in per machine, inside a default service
+
+Syncthing stays a default, and so do `groundwork-shared` and `groundwork-freetube`. The vault folder is opt-in per machine: it exists only where the person saved a vault path, and "no vault" is a saved answer. Three things push it that way. The vault is personal writing, not app state Groundwork created. Its path differs between machines, so any default would be a guess, and a guess at the wrong folder shares the wrong notes. And a first pairing between two machines that already have notes could merge two different vaults. The environment repos still ask the question by default, so a person who wants the vault shared does not have to find a setting.
+
+### Trash can, not simple versioning
+
+`groundwork-obsidian` uses trash-can versioning with `cleanoutDays` `0`, the same as FreeTube. Syncthing archives only changes that arrive from another device, so the hazard it covers is a remote delete or overwrite of a note. The trash can keeps one copy per path and replaces it on the next archive. Simple versioning keeps several timestamped copies per path. Notes are edited constantly, so simple versioning would fill `.stversions` with copies of every remote edit, and it still would not be history: a local edit is never archived. One copy per path is enough to undo a bad sync. `cleanoutDays` `0` means a deleted note stays recoverable until a person removes it. Real note history is Obsidian Git or a backup, and the contract says so.
+
+### Ignore lines
+
+The ignore file has three lines, anchored to the vault root: `/.obsidian/workspace.json`, `/.obsidian/workspace-mobile.json`, and `/.obsidian/cache`. The Obsidian Hub's Syncthing page names the two workspace files as the most important ones, because they track open panes and files. A Syncthing forum reply on 2025-10-02 gives the same cause: Obsidian writes `workspace.json` while the copy is in flight. `/.obsidian/cache` is cache data, and the issue named it. The anchor matters because Syncthing matches a pattern without a leading slash at any depth.
+
+Nothing else is ignored. `appearance.json`, `graph.json`, hotkeys, themes, snippets, and `plugins/` stay synced, because they are the vault's settings and the reason to share `.obsidian` at all. Obsidian Sync's own defaults sync main settings, appearance, themes and snippets, hotkeys, and core plugin settings. The forum advice to ignore all of `.obsidian` was set aside: Obsidian's help offers that only for people who want separate settings on each device, and the Hub page warns it stops plugins and configuration from syncing. If a specific plugin's per-device file later causes conflicts, that is one more line, added with a source.
+
+### First pairing is receive-only
+
+Two existing vaults joined as send-and-receive would merge on the first scan. Files only on one side go to the other. A file at the same path with different contents is a conflict, Syncthing renames the copy with the older modification time to `*.sync-conflict-*`, and it propagates conflict copies as normal files. That is the merge the issue says must never happen without a clear prompt.
+
+So pairing creates the folder `receiveonly` on every machine. Syncthing's folder-type page says a receive-only folder keeps local changes and does not send them, and that a locally changed file later changed by the cluster resolves with the cluster as the winner and a local conflict copy that is not sent. The local notes stay on disk. `groundwork syncthing-pair obsidian-promote` is the one switch to `sendreceive`. It requires this machine's own completion to be 100 first, so it never waits on a receive-only peer that cannot catch up. It then lists `GET /rest/db/localchanged` and sorts each entry into new, changed, or deleted. A receive-only folder records local edits and local deletions as well as new files, and after promotion an edit replaces that note everywhere and a deletion deletes it everywhere, with one copy left in each machine's trash can. So it promotes silently only when that list is empty, and otherwise needs a typed yes after saying what each class will do and whether another machine is already a source. Machines are promoted one at a time, each after the previous promote has reached it. The first machine promoted is the source, confirmed by that same prompt. Groundwork never calls revert on this folder, because revert deletes files that exist only on that machine.
+
+A per-machine flag naming the source at `add` time was set aside. It would be a second way in, and it would let `add` on the wrong machine publish a vault before the person had seen what was in it.
+
+### Path rules
+
+The path is the saved one, absolute, in the user's home, under the state key `syncthing.obsidian_vault` that every environment repo shares. Setup asks, `add` asks when setup did not, and a run with no terminal skips the folder. `groundwork syncthing-pair obsidian-vault` changes or clears the answer. Every check compares resolved real paths, case-insensitively on macOS, so a symlink or a case difference cannot slip past it. It is never inside `~/Shared` and never contains it, so no file belongs to two folders. It is not inside iCloud Drive, because Obsidian's help says to avoid syncing one vault with more than one service. A missing path is skipped and reported, never created. A folder already stored at another path is reported, never retargeted. Groundwork never creates, moves, or relocates a vault.
+
+### Sharing
+
+The folder goes only to devices `groundwork syncthing-pair add` already added. `autoAcceptFolders` and `introducer` stay `false`, which is Syncthing's default, so an unknown device cannot be introduced into the vault and a folder offer is not taken with the GUI's suggested path.

@@ -169,8 +169,11 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertIn("listenAddress", listen_setting)
         self.assertIn("`PATCH /rest/config/options` with `listenAddresses`", text)
         self.assertIn("repeated `listenAddress` elements in `config.xml`", text)
-        self.assertIn("trashcan", value_for("folder.versioning"))
-        self.assertIn("cleanoutDays", value_for("folder.versioning"))
+        for folder in ("groundwork-freetube", "groundwork-obsidian"):
+            with self.subTest(versioning=folder):
+                versioning = value_for(f"`folder.versioning` on `{folder}`")
+                self.assertIn("trashcan", versioning)
+                self.assertIn("cleanoutDays", versioning)
         for row in override_rows:
             with self.subTest(setting=row[0]):
                 self.assertGreaterEqual(len(row), 3)
@@ -387,6 +390,102 @@ class SyncthingDocsTest(unittest.TestCase):
             text.index("Never promote `name.db~` when a main file exists."),
             text.index("Classify each data-dir path with `lstat`"),
         )
+
+    def test_obsidian_vault_contract(self) -> None:
+        text = DEFINITION.read_text()
+        decision = DECISION.read_text()
+        section = text.split("## Obsidian vault", 1)[1].split("\n## ", 1)[0]
+        folders = _table_rows(text, "| | `groundwork-shared` |")
+        by_row = {row[0]: row for row in folders}
+        self.assertEqual(by_row["Label"][3], "`Obsidian`")
+        self.assertIn("never inside `~/Shared`", by_row["Path"][3])
+        self.assertIn("`trashcan`", by_row["Versioning"][3])
+        self.assertIn("`cleanoutDays` `0`", by_row["Versioning"][3])
+        self.assertIn("`receiveonly` when first added", by_row["Type"][3])
+        ignore = re.search(r"```text\n(.*?)```", section, re.S)
+        self.assertIsNotNone(ignore)
+        self.assertEqual(
+            ignore.group(1).split(),
+            [
+                "/.obsidian/workspace.json",
+                "/.obsidian/workspace-mobile.json",
+                "/.obsidian/cache",
+            ],
+        )
+        for phrase in (
+            "before the folder is added and before the first scan",
+            "these lines come before any `!` pattern",
+            "Everything else in `.obsidian` syncs",
+            "`plugins/`",
+            "It is sync, not a backup.",
+            "Obsidian Git",
+            "Never create a vault, never create the saved directory, and never move, rename, or relocate an existing vault.",
+            "If the vault folder is missing, skip it and print the saved path.",
+            "Do not retarget the folder.",
+            "The vault is never nested inside `~/Shared`",
+            "`~/Library/Mobile Documents`",
+            "creates `groundwork-obsidian` as `receiveonly` on every machine",
+            "groundwork syncthing-pair obsidian-promote",
+            "is the only path from `receiveonly` to `sendreceive`",
+            "GET /rest/db/localchanged?folder=groundwork-obsidian",
+            'PATCH /rest/config/folders/groundwork-obsidian` with only `{"type": "sendreceive"}`',
+            "Only a typed yes promotes.",
+            "this merges two vaults",
+            "Groundwork never calls `POST /rest/db/revert` on `groundwork-obsidian`.",
+            "never sets `autoAcceptFolders` or `introducer` to `true`",
+            "never accepts a pending device or a pending folder",
+            "This repository never holds a vault path.",
+            "`syncthing.obsidian_vault`",
+            "groundwork syncthing-pair obsidian-vault --clear",
+            "A run with no terminal does not ask, does not save anything, skips `groundwork-obsidian`",
+            "uses resolved real paths",
+            "case-insensitive",
+            "Promote one machine at a time.",
+            "with no `device` parameter, must report `completion` 100",
+            "`needTotalItems` 0 and `pullErrors` 0",
+            "Do not wait on a peer's completion",
+            "page through it with `page` and `perpage`",
+            "65536",
+            "**new:**",
+            "**changed:**",
+            "**deleted:**",
+            "Changed files replace that note there. Deleted files delete that note there.",
+            "in its own trash can (`.stversions`)",
+            "renames the copy with the older modification time",
+            "always returns a `global` object",
+            "An empty `global.name` means the cluster has no entry for that path.",
+            "a live copy is `global.deleted` false and `global.invalid` false",
+            "**new:** `deleted` is false and there is no live copy.",
+            "**changed:** `deleted` is false and there is a live copy.",
+            "**deleted:** `deleted` is true and there is a live copy.",
+            "A deleted entry with no live copy is a local-only deletion.",
+            "left out of every class, out of the prompt, and out of the count",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, section)
+        self.assertNotIn("as `sendreceive` on", section)
+        self.assertNotIn("for each connected device and this folder to be complete", section)
+        self.assertNotIn("becomes a `*.sync-conflict-*` copy there", section)
+        self.assertNotIn("Nothing in the local vault is deleted", section)
+        self.assertNotIn("has no `global`", section)
+        self.assertNotIn("or `global.deleted` is true)", section)
+        self.assertLess(
+            text.index("apply the [saved vault path](#saved-vault-path) rules first"),
+            text.index("8. Exit 0."),
+        )
+        self.assertIn("type `receiveonly`, and trash-can versioning", text)
+        self.assertIn("`groundwork-obsidian` is not written at install.", text)
+        lowered = decision.lower()
+        for phrase in (
+            "issue 47",
+            "opt-in per machine",
+            "trash can, not simple versioning",
+            "first pairing is receive-only",
+            "obsidian git",
+            "reviewed on 2026-10-31",
+        ):
+            with self.subTest(decision=phrase):
+                self.assertIn(phrase, lowered)
 
     def test_lead_keeps_credentials_out_of_the_share(self) -> None:
         paragraphs = [part.strip() for part in DEFINITION.read_text().split("\n\n") if part.strip()]

@@ -1,10 +1,12 @@
 # Syncthing shared folders
 
-This page is how a file you save on one Groundwork machine shows up on the others: the Mac, Linux, Windows, and the Omarchy mini. Syncthing is the default that does it, as a user service over the personal Tailscale tailnet. `~/Shared` is one Syncthing folder, `groundwork-shared`. FreeTube's four databases are a second folder, `groundwork-freetube`, at `~/Shared/FreeTube`. The Omarchy M1 mini stays on so the other machines still have a peer when they sleep. SSH keys, tokens, and agent credentials stay in their existing locations, out of `~/Shared`.
+This page is how a file you save on one Groundwork machine shows up on the others: the Mac, Linux, Windows, and the Omarchy mini. Syncthing is the default that does it, as a user service over the personal Tailscale tailnet. `~/Shared` is one Syncthing folder, `groundwork-shared`. FreeTube's four databases are a second folder, `groundwork-freetube`, at `~/Shared/FreeTube`. An Obsidian vault is a third folder, `groundwork-obsidian`, at the vault path each machine saved, outside `~/Shared`. The Omarchy M1 mini stays on so the other machines still have a peer when they sleep. SSH keys, tokens, and agent credentials stay in their existing locations, out of `~/Shared`.
 
-This page is the contract. [The decision record](decisions/syncthing-shared-folders.md) explains why Syncthing, why the other candidates were set aside, and why FreeTube still has no sync of its own. Environment repos install the package, start the service, and implement `groundwork syncthing-pair`. They reference this page. They do not keep a second copy of it.
+This page is the contract. [The decision record](decisions/syncthing-shared-folders.md) explains why Syncthing, why the other candidates were set aside, why FreeTube still has no sync of its own, and how the Obsidian folder's open points were decided. Environment repos install the package, start the service, and implement `groundwork syncthing-pair`. They reference this page. They do not keep a second copy of it.
 
 Reviewed on 2026-10-24 against [Syncthing's configuration](https://docs.syncthing.net/users/config.html), [GUI listen address](https://docs.syncthing.net/users/guilisten.html), [autostart](https://docs.syncthing.net/users/autostart.html), [config REST endpoints](https://docs.syncthing.net/rest/config.html), and [Tailscale's reserved addresses](https://tailscale.com/docs/reference/reserved-ip-addresses). Tailnet ports are recorded in [Tailscale](tailscale.md). The pause check and the index drop were read on 2026-10-29 in Syncthing 2.1.7 [`ResetFolder`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/model/model.go#L2923-L2931). The restart after a successful reset was read the same day in [`postSystemReset`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/api/api.go#L986-L1018) and [`fatal`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/api/api.go#L504-L510). [`Serve`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/api/api.go#L449-L460) keeps accepting requests until it sees that exit and shuts the server down. [`State`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/model/model.go#L2658-L2667) returns `""` when the folder has no runner. `startTime` on `GET /rest/system/status` is the process start ([`usage_report.go`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/ur/usage_report.go#L42), exposed at [`api.go`](https://github.com/syncthing/syncthing/blob/v2.1.7/lib/api/api.go#L1066)). The [public reset page](https://docs.syncthing.net/rest/system-reset-post.html) says the call erases the index and restarts Syncthing. It does not state the pause check.
+
+The Obsidian folder was reviewed on 2026-10-31 against Syncthing's [folder types](https://docs.syncthing.net/users/foldertypes.html), [file versioning](https://docs.syncthing.net/users/versioning.html), [ignoring files](https://docs.syncthing.net/users/ignoring.html), [conflicting changes](https://docs.syncthing.net/users/syncing.html), and the device attributes `autoAcceptFolders` and `introducer` in [Syncthing's configuration](https://docs.syncthing.net/users/config.html). Obsidian's side was read the same day in [Sync your notes across devices](https://obsidian.md/help/sync-notes), [Sync settings and selective syncing](https://obsidian.md/help/sync/settings), [Switch to Obsidian Sync](https://obsidian.md/help/sync/switch), and the community [Obsidian Hub Syncthing page](https://publish.obsidian.md/hub/02+-+Community+Expansions/02.05+All+Community+Expansions/Auxiliary+Tools/Syncthing).
 
 A device ID identifies a machine to its peers. An API key authorizes the local REST API. Both stay on the machine that created them. This repository never holds a device ID, an API key, a certificate, a MagicDNS name, or a Tailscale address.
 
@@ -29,12 +31,13 @@ WSL is not a Syncthing peer. FreeTube on Windows reads `%APPDATA%\FreeTube` on t
 
 `~/Shared` stays one Syncthing folder. The FreeTube wrapper never pauses `groundwork-shared`. The four FreeTube databases are folder `groundwork-freetube`, so a FreeTube session does not stop the rest of the share. A FreeTube session pauses and resumes only `groundwork-freetube`.
 
-| | `groundwork-shared` | `groundwork-freetube` |
-| --- | --- | --- |
-| Path | `~/Shared`, that user's absolute home path | `~/Shared/FreeTube`, that same home, absolute |
-| Label | `Shared` | `FreeTube` |
-| Type | `sendreceive` | `sendreceive`, or `receiveonly` while a missing database is restored |
-| Versioning | Syncthing's default, no versioning | trash can: `versioning.type` `trashcan`, `cleanoutDays` `0` |
+| | `groundwork-shared` | `groundwork-freetube` | `groundwork-obsidian` |
+| --- | --- | --- | --- |
+| Path | `~/Shared`, that user's absolute home path | `~/Shared/FreeTube`, that same home, absolute | That machine's saved vault path, absolute, never inside `~/Shared` |
+| Label | `Shared` | `FreeTube` | `Obsidian` |
+| Type | `sendreceive` | `sendreceive`, or `receiveonly` while a missing database is restored | `receiveonly` when first added, `sendreceive` after the person confirms that machine |
+| Versioning | Syncthing's default, no versioning | trash can: `versioning.type` `trashcan`, `cleanoutDays` `0` | trash can: `versioning.type` `trashcan`, `cleanoutDays` `0` |
+| Added by | install and pairing | install and pairing | pairing only, and only on a machine with a saved vault path |
 
 Syncthing does not support a folder nested inside another as a general feature. These two still share a parent path because the databases have to be paused on their own. `/FreeTube` is the first pattern in `~/Shared/.stignore`. The first matching pattern wins, so that line is never appended under a `!` rule. The pattern `*~` in `~/Shared/FreeTube/.stignore` keeps a crash temp such as `history.db~` from being synced. Both files are written before either folder is added and before the first scan. Without the parent ignore, `groundwork-shared` would index the databases, and a fresh local file would publish through the parent while `groundwork-freetube` was paused or receive-only. `.stignore` itself is not synced.
 
@@ -54,7 +57,7 @@ After the new process accepts the unpause, poll `GET /rest/db/status?folder=grou
 
 `groundwork-freetube` uses trash-can versioning. Syncthing archives a file when a remote device replaces or deletes it, and moves that old copy to `.stversions`. A fresh empty database is newer than the history it replaces, and FreeTube will not merge the two. `cleanoutDays` `0` keeps the trash-can copy until a person removes it. `groundwork-shared` keeps the default of no versioning. The rescan interval stays at Syncthing's default on both folders.
 
-Later app folders are further subdirectories of `~/Shared`, added here first and then in the environment repos. A new app folder that must be paused on its own cannot sit inside `groundwork-shared` unless that parent ignores it the same way.
+Later app folders are further subdirectories of `~/Shared`, added here first and then in the environment repos. A new app folder that must be paused on its own cannot sit inside `groundwork-shared` unless that parent ignores it the same way. The Obsidian vault is not an app folder under `~/Shared`. It stays where the person keeps it, and the [Obsidian vault](#obsidian-vault) rules below apply.
 
 The first launch of an unconfigured Syncthing creates a folder at `~/Sync`. Groundwork's folder is `~/Shared`, so the service environment sets `STNODEFAULTFOLDER=1` before `syncthing generate` and before the service starts. An existing `~/Sync` that a person already uses is left in place. The apply does not delete it.
 
@@ -84,7 +87,7 @@ Order on a new machine:
 2. Run `syncthing generate` with `STNODEFAULTFOLDER=1` when `config.xml` is absent. Generate writes the certificate and config and exits. It does not listen.
 3. Create `~/Shared` and `~/Shared/FreeTube`.
 4. Write `/FreeTube` as the first pattern in `~/Shared/.stignore`, and `*~` in `~/Shared/FreeTube/.stignore`. Do this before either folder is added and before the first scan.
-5. Write the overrides below into that local config, including both folders.
+5. Write the overrides below into that local config, including both folders. `groundwork-obsidian` is not written at install. Pairing adds it.
 6. Enable and start the user service.
 7. Confirm `STGUIADDRESS` and `--gui-address` are unset, the running sync listener matches the list above, and the listening socket is `127.0.0.1:8384`. The override hides the config value. The step stays unfinished until the override is unset and the listening socket is `127.0.0.1:8384`.
 
@@ -111,12 +114,13 @@ Each row is a setting Groundwork changes from the upstream default. The value is
 | `device.addresses` | `tcp://MAGICDNS:22000` and `quic://MAGICDNS:22000` | With discovery off, the upstream address `dynamic` has no way to find the peer. `MAGICDNS` is the other machine's MagicDNS name, entered at pair time. |
 | `device.allowedNetworks` | `100.64.0.0/10` and `fd7a:115c:a1e0::/48` | An empty list, which is the upstream default, accepts that device from any network. These two prefixes are Tailscale's IPv4 and IPv6 ranges. |
 | `folder.versioning` on `groundwork-freetube` | type `trashcan`, param `cleanoutDays` `0` | Versioning archives a remote replace or delete into `.stversions`. The default, no versioning, drops the previous database. A fresh empty database is newer than the history it replaces, and FreeTube will not merge the two. `cleanoutDays` 0 does not purge the trash can on a timer. |
+| `folder.versioning` on `groundwork-obsidian` | type `trashcan`, param `cleanoutDays` `0` | A note deleted or overwritten on another machine is archived into the vault's `.stversions` instead of dropped. The trash can keeps one copy per path, so a note edited many times a day does not pile up copies. This is a safety net for sync, not note history. |
 
 ### GUI address
 
 A later apply writes `gui.address` back to `127.0.0.1:8384` when it differs. That write is `PATCH /rest/config/gui` with only `{"address":"127.0.0.1:8384"}`. A `PUT` clears the password. The service must not set `STGUIADDRESS` or `--gui-address`. The override hides the config value at runtime and does not rewrite `config.xml`. The step stays unfinished until the override is unset and the listening socket is `127.0.0.1:8384`. The GUI and the REST API share one listen address. `127.0.0.1:8384` is the upstream localhost value. `0.0.0.0` would also listen on the LAN, and that API can read and write every synced file. The Tailscale address alone would drop the local browser. Remote use is the SSH forward above.
 
-A later apply leaves `gui.user`, `gui.password`, `options.urAccepted`, `options.crashReportingEnabled`, and folder versioning on `groundwork-shared` at the values already stored. Those are the person's choices. Groundwork does not write them on a later apply. On `groundwork-freetube`, a later apply writes trash-can versioning back when `versioning.type` is not `trashcan` or `cleanoutDays` is not `0`. That write changes only the versioning object.
+A later apply leaves `gui.user`, `gui.password`, `options.urAccepted`, `options.crashReportingEnabled`, and folder versioning on `groundwork-shared` at the values already stored. Those are the person's choices. Groundwork does not write them on a later apply. On `groundwork-freetube` and `groundwork-obsidian`, a later apply writes trash-can versioning back when `versioning.type` is not `trashcan` or `cleanoutDays` is not `0`. That write changes only the versioning object.
 
 Discovery server URLs and the relay server URL stay at `default`. The enabled flags above are what turn them off. Clearing the URLs would be a second edit for the same restriction.
 
@@ -171,6 +175,82 @@ Open FreeTube on one machine at a time. Quit it, and wait until Syncthing report
 
 If a `*.sync-conflict-*` copy appears, Quit FreeTube on every machine, print both paths, and stop. Recovery does not choose the newer file by mtime. A fresh empty database is newer than the synced one. Remove a `*.sync-conflict-*` file only after a person compares the copies.
 
+## Obsidian vault
+
+Folder `groundwork-obsidian`, label `Obsidian`, shares one Obsidian vault between the person's machines. It replaces iCloud or a paid sync service for that vault. It is sync, not a backup. Note history belongs to a tool built for it, such as the Obsidian Git community plugin or a separate backup.
+
+### Saved vault path
+
+Each environment repo saves this machine's answer under the local state key `syncthing.obsidian_vault`, outside any git checkout. The value is an absolute path, or `none` for "no vault on this machine". A missing key means the question has not been answered yet. `none` is an answer and is never asked again.
+
+The question is asked during setup when setup has a terminal. When the key is still missing, `groundwork syncthing-pair add` asks before it reaches `groundwork-obsidian`. A run with no terminal does not ask, does not save anything, skips `groundwork-obsidian`, and prints the command below. The other folders continue. One command changes or clears the answer on every environment:
+
+```bash
+groundwork syncthing-pair obsidian-vault PATH
+groundwork syncthing-pair obsidian-vault --none
+groundwork syncthing-pair obsidian-vault --clear
+```
+
+`PATH` saves that path after the rules below pass. `--none` saves `none`. `--clear` removes the key, so the next setup or `add` asks again. The command writes only that key. It never changes the Syncthing folder. When `groundwork-obsidian` already exists at another path, the next `add` stops and reports both, as below.
+
+The answer is an absolute path in that user's home. It may differ between machines, for example `~/Documents/Obsidian/<vault>` on the mini and another folder on the Mac. Groundwork does not guess a path, and does not pick the first vault it finds. This repository never holds a vault path.
+
+Before any write for this folder, check the saved path. Every comparison below uses resolved real paths: the saved path, `~/Shared`, the home, every other folder path, and iCloud Drive each go through `realpath` first, so a symlink into iCloud Drive or into `~/Shared` is caught. On macOS the comparison is also case-insensitive, because APFS volumes are case-insensitive by default, so `~/shared` is `~/Shared`. Skip `groundwork-obsidian` and say so, and keep going with the other folders, when any of these is true:
+
+- No vault is saved for this machine, or the saved answer is `none`.
+- The saved path is not absolute, or is not inside that user's home, or is the home itself.
+- The saved path is `~/Shared`, is inside `~/Shared`, or contains `~/Shared`. The vault is never nested inside `~/Shared`, and `~/Shared` is never nested inside the vault.
+- The saved path is, contains, or is inside the path of another folder in this Syncthing config.
+- The saved path is inside iCloud Drive (`~/Library/Mobile Documents`). Obsidian's own help says to avoid syncing the same vault with more than one service.
+- The saved path does not exist, is not a directory, or has no `.obsidian` directory in it.
+
+Never create a vault, never create the saved directory, and never move, rename, or relocate an existing vault. If the vault folder is missing, skip it and print the saved path. Writing `.stignore` into a missing path would create it, so the check comes first. When the stored folder path in Syncthing differs from the saved path, stop and report both. Do not retarget the folder. The person turns off Obsidian Sync for a vault before sharing it here.
+
+### Ignore file
+
+Write these three lines as the first three patterns of `<vault>/.stignore` before the folder is added and before the first scan:
+
+```text
+/.obsidian/workspace.json
+/.obsidian/workspace-mobile.json
+/.obsidian/cache
+```
+
+Obsidian rewrites the open panes and files in `workspace.json` on desktop and `workspace-mobile.json` on mobile whenever the layout changes, so two running machines make conflict copies of them. `/.obsidian/cache` is cache data that each machine rebuilds for itself. The leading `/` anchors each line to the vault root, so a folder of notes that happens to be named `.obsidian` deeper down is not affected. The first matching pattern wins, so these lines come before any `!` pattern. Lines the person already has in that `.stignore` stay below them. A later apply adds any of the three that is missing and changes nothing else in the file. `.stignore` itself is not synced, so every machine writes its own.
+
+Everything else in `.obsidian` syncs: `app.json`, `appearance.json`, `core-plugins.json`, `community-plugins.json`, hotkeys, themes, snippets, `graph.json`, `workspaces.json` (named layouts the person saved), and `plugins/`, including each plugin's `data.json`. Those are the vault's settings, and Obsidian Sync syncs the same groups by default. A plugin that writes a per-device cache inside its own folder is a per-plugin ignore line the person adds. Groundwork does not add one.
+
+### First pairing
+
+`groundwork syncthing-pair add` creates `groundwork-obsidian` as `receiveonly` on every machine. It never creates it as `sendreceive`. A receive-only folder takes the cluster's files and does not send its own. Its existing notes stay on disk and are listed as local changes. When a note at the same path arrives from the cluster, the cluster copy wins and the local copy is kept beside it as a `*.sync-conflict-*` file. That copy is not sent while the folder is receive-only. Changes from the cluster, including deletions, still apply here, and each copy they replace goes to the trash can. Groundwork deletes nothing in the local vault, and nothing leaves it while the folder is receive-only.
+
+The person then names the machine whose vault is the source:
+
+```bash
+groundwork syncthing-pair obsidian-promote
+```
+
+`obsidian-promote` is the only path from `receiveonly` to `sendreceive`. Promote one machine at a time. Promote the next machine only after the first promote has been seen there: that machine's `globalFiles` is above zero and its local completion is 100.
+
+1. Require the same service, GUI, file-mode, and version checks as `add`. Re-check the saved path rules above. Require `groundwork-obsidian` to exist with the saved path and type `receiveonly`. When the type is already `sendreceive`, exit 0 and change nothing.
+2. Require this machine to have everything the cluster has. `GET /rest/db/completion?folder=groundwork-obsidian`, with no `device` parameter, must report `completion` 100. `GET /rest/db/status?folder=groundwork-obsidian` must be `idle`, with `needTotalItems` 0 and `pullErrors` 0. At least one other device in `folder.devices` must be connected. Print the name of each device that is not connected. Do not wait on a peer's completion: a receive-only peer never catches up to this machine until this machine sends.
+3. `GET /rest/db/localchanged?folder=groundwork-obsidian` and page through it with `page` and `perpage` until a page comes back short. The default page is 65536 entries. The list is every receive-only change on this machine. For each entry, `GET /rest/db/file` for folder `groundwork-obsidian` always returns a `global` object. An empty `global.name` means the cluster has no entry for that path. Otherwise a live copy is `global.deleted` false and `global.invalid` false, the same definition as FreeTube above. A receive-only change is announced as invalid, so on the first machine promoted each note's global is its own invalid entry, which is not a live copy. Classify each entry:
+   - **new:** `deleted` is false and there is no live copy. The `*.sync-conflict-*` copies made above are new.
+   - **changed:** `deleted` is false and there is a live copy.
+   - **deleted:** `deleted` is true and there is a live copy.
+   - A deleted entry with no live copy is a local-only deletion. It has no effect on any other machine, so it is left out of every class, out of the prompt, and out of the count.
+   Print the count in each class and the paths. Never print note contents.
+4. When no entry is new, changed, or deleted, `PATCH /rest/config/folders/groundwork-obsidian` with only `{"type": "sendreceive"}`. Nothing merges, because this machine already matches the cluster.
+5. When any entry is new, changed, or deleted, ask once. Say plainly what each class does on every machine that shares the vault. New files are added there. Changed files replace that note there. Deleted files delete that note there. Each machine keeps the copy it lost once, in its own trash can (`.stversions`). When another machine edits the same note at the same time, Syncthing treats it as a conflict and renames the copy with the older modification time to `*.sync-conflict-*`. Conflict copies are normal files after they are made, so they also reach every machine. When `globalFiles` in step 2's status is above zero, another machine is already a source, and the prompt says this merges two vaults. When it is zero, the prompt says this machine becomes the source and asks the person to confirm no other machine has been promoted. Only a typed yes promotes. Any other answer, no terminal, or an interrupt leaves the folder `receiveonly` and changes nothing.
+
+Groundwork never calls `POST /rest/db/revert` on `groundwork-obsidian`. Revert deletes files that exist only on this machine. A person who wants this machine to match the cluster exactly can press Revert Local Changes in the GUI after reading what it removes.
+
+The first machine promoted has nothing to receive, so its whole vault is the list in step 3 and the prompt is its source confirmation. A machine joining a vault that is already shared starts receive-only, fills from the cluster, and is promoted when its list is empty or the person accepts each class in it. When two machines already hold different vaults, nothing merges until the person types yes on the second one.
+
+### Sharing
+
+`groundwork-obsidian` is shared only with devices that `groundwork syncthing-pair add` already added. Pairing never sets `autoAcceptFolders` or `introducer` to `true`, and never accepts a pending device or a pending folder. When the other machine offers `groundwork-obsidian` first, this machine's `add` creates the folder itself at the saved path with the rules above. Accepting the offer in the GUI would use the GUI's suggested path, not the saved vault. The apply never adds this folder at install, never changes its type, and never pauses it.
+
 ## Pairing
 
 Pairing is a separate command from install. Bootstrap does not have the other machine's device ID, and this repository must not gain one. The person runs the same command on both machines. Each command talks only to the Syncthing on that machine. It does not call the other machine's API, so the machines never exchange API keys.
@@ -178,11 +258,12 @@ Pairing is a separate command from install. Bootstrap does not have the other ma
 ```bash
 groundwork syncthing-pair show
 groundwork syncthing-pair add --device-id DEVICE_ID --name NAME --magicdns MAGICDNS
+groundwork syncthing-pair obsidian-promote
 ```
 
-`DEVICE_ID`, `NAME`, and `MAGICDNS` are placeholders. `show` prints this machine's device ID and nothing else. `NAME` is a local label. `MAGICDNS` is the other machine's MagicDNS name, used only to build the two device addresses.
+`DEVICE_ID`, `NAME`, and `MAGICDNS` are placeholders. `show` prints this machine's device ID and nothing else. `NAME` is a local label. `MAGICDNS` is the other machine's MagicDNS name, used only to build the two device addresses. `obsidian-promote` is described in [First pairing](#first-pairing), and `obsidian-vault` in [Saved vault path](#saved-vault-path).
 
-`add` is safe to run again with the same arguments. A second run that already matches exits 0 and does not create a duplicate device entry or a duplicate share of either folder.
+`add` is safe to run again with the same arguments. A second run that already matches exits 0 and does not create a duplicate device entry or a duplicate share of any folder.
 
 1. Require the user service to be running and the GUI to be on `127.0.0.1:8384`. If the service is down, print that platform's start command and exit nonzero. Do not start a second Syncthing process.
 2. On Unix, require `config.xml` and `key.pem` to be mode `0600`. On Windows, require the ACL of both `config.xml` and `key.pem` to grant only the current user, `SYSTEM`, and `Administrators`. Any other trustee fails the check. Otherwise exit nonzero. The config directory is the one this install uses: `$XDG_STATE_HOME/syncthing` or `~/.local/state/syncthing` on Linux, `~/Library/Application Support/Syncthing` on macOS, `%LOCALAPPDATA%\Syncthing` on Windows. If the pre-1.27 path `~/.config/syncthing/config.xml` exists and the new path does not, use the old path.
@@ -190,9 +271,10 @@ groundwork syncthing-pair add --device-id DEVICE_ID --name NAME --magicdns MAGIC
 4. Reject a malformed device ID, and reject this machine's own device ID. `show` is how the other machine's ID is obtained (`syncthing device-id`, `syncthing --device-id`, or `syncthing cli show system`, whichever the installed binary accepts). Print that ID only. Do not write it into a repo, a shell rc, or a world-readable file.
 5. `GET /rest/config/devices/<id>`. When the device is absent, `GET /rest/config/defaults/device`, set `deviceID`, `name`, `addresses`, and `allowedNetworks` on that object, and `POST` it. When it is present and those fields already match, leave it with no device write. When they differ, `PUT` the object from the device `GET`, changing only those fields, so a re-run converges and unrelated device fields survive.
 6. For each of `groundwork-shared` and `groundwork-freetube`, `GET /rest/config/folders/<id>`. The path for `groundwork-shared` is the user's absolute `~/Shared`. The path for `groundwork-freetube` is the user's absolute `~/Shared/FreeTube`. When the folder is absent, start from `GET /rest/config/defaults/folder`, set the id, label, and that absolute path, and add this device from `GET /rest/config/defaults/device` (its `deviceID` set). On `groundwork-freetube`, set trash-can versioning with `cleanoutDays` `0`. When the folder is present, compare its path with that absolute path before any write decision. When the stored path is not that absolute path, stop and report it. Do not write the folder and do not retarget a folder that was moved. When the path matches and this device ID is already in `folder.devices`, do not write the folder. When the path matches and the ID is absent, append that defaults/device entry and write the folder once. That write sends the folder object from this GET. Do not `PUT` a default folder object over a paused folder. On `groundwork-freetube`, when versioning is not trash-can with `cleanoutDays` `0`, set that versioning on the object from this GET and write it once.
-7. Exit 0. The success line names the label and says the other machine runs `add` with this machine's device ID. It does not include the API key, the certificate, or `key.pem`.
+7. For `groundwork-obsidian`, apply the [saved vault path](#saved-vault-path) rules first. When they say skip, print why and the saved path, leave any existing `groundwork-obsidian` object alone, and continue. Otherwise `GET /rest/config/folders/groundwork-obsidian`. When the folder is absent, write the three [ignore lines](#ignore-file) into `<vault>/.stignore` first, then start from `GET /rest/config/defaults/folder`, set id `groundwork-obsidian`, label `Obsidian`, the saved absolute path, type `receiveonly`, and trash-can versioning with `cleanoutDays` `0`, add the device from this run the same way as step 6, and `POST` it. When the folder is present, use the same path comparison and device rule as step 6. Never change its type here. When versioning is not trash-can with `cleanoutDays` `0`, set it on the object from this GET and write it once.
+8. Exit 0. The success line names the label and says the other machine runs `add` with this machine's device ID. It does not include the API key, the certificate, or `key.pem`.
 
-Both directions are required. Adding machine B on machine A shows B a pending device until B adds A. After both adds, `groundwork-shared` and `groundwork-freetube` are shared in both directions and the files converge. Repeat `show` and `add` for each pair. The mini is the useful first peer, because it is the one that stays on.
+Both directions are required. Adding machine B on machine A shows B a pending device until B adds A. After both adds, `groundwork-shared` and `groundwork-freetube` are shared in both directions and the files converge. `groundwork-obsidian` is shared in both directions but stays receive-only on each machine until `obsidian-promote` runs there. Repeat `show` and `add` for each pair. The mini is the useful first peer, because it is the one that stays on.
 
 ## What each environment repo implements
 
@@ -205,4 +287,4 @@ Package installation, the service manager, the Flatpak grant, and the Windows sy
 | `groundwork-windows` | Winget `Syncthing.Syncthing`, on the Windows host. Per-user logon start with `--no-console --no-browser` and `STNODEFAULTFOLDER=1`. | Winget `FreeTube.FreeTube`. Data directory `%APPDATA%\FreeTube`. `PrestonN.FreeTube` is the old publisher id and stops at 0.23.14. Creating the file symlinks needs a user who is allowed to create symlinks; if that permission is missing, set the step aside and retry, and do not mark it finished. |
 | `groundwork-omarchy-mac-arm64` | Pacman `syncthing` via `omarchy pkg add syncthing` (Arch Linux ARM `extra`, aarch64), then `systemctl --user enable --now syncthing.service`. Enable linger on the mini. Confirm this package runs on the mini's 16 KiB pages before treating the install as finished. | The FreeTube package is chosen in that repo. Flatpak `io.freetubeapp.FreeTube` uses `~/.var/app/io.freetubeapp.FreeTube/config/FreeTube/` and the same narrow filesystem grant. A native `freetube-bin` install uses `~/.config/FreeTube`. Use the path that matches the package that actually launches. |
 
-Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, and the FreeTube wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. The wrapper takes an exclusive non-blocking lock before any `lstat`, move, link, or `PATCH` and holds it in the waiting process until resume. A direct binary launch is outside this contract. Each repo shows the one-machine warning on the FreeTube cheatsheet or app list. The FreeTube cheatsheet says Quit, not close the window. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
+Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, and the FreeTube wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. The wrapper takes an exclusive non-blocking lock before any `lstat`, move, link, or `PATCH` and holds it in the waiting process until resume. A direct binary launch is outside this contract. Each repo shows the one-machine warning on the FreeTube cheatsheet or app list. Each repo also asks for the Obsidian vault at setup or `add`, keeps it under the local state key `syncthing.obsidian_vault` outside any git checkout, and implements `groundwork syncthing-pair obsidian-vault` and `groundwork syncthing-pair obsidian-promote`. A machine with no saved vault skips `groundwork-obsidian`. The FreeTube cheatsheet says Quit, not close the window. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.

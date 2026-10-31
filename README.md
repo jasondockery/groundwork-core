@@ -38,7 +38,7 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 - [`docs/ai-tools-and-remote-access.md`](docs/ai-tools-and-remote-access.md), shared T3 Code, Herdr, and Tailscale guidance
 - [`docs/local-models.md`](docs/local-models.md), shared evaluation and privacy guidance for optional local models
 - [`docs/tailscale.md`](docs/tailscale.md), the common tailnet security and connection guide referenced by each environment
-- [`docs/syncthing.md`](docs/syncthing.md), the shared-folder default (Syncthing over the tailnet, `~/Shared`, FreeTube's database files) and [`docs/decisions/syncthing-shared-folders.md`](docs/decisions/syncthing-shared-folders.md), the decision record
+- [`docs/syncthing.md`](docs/syncthing.md), the shared-folder default (Syncthing over the tailnet, `~/Shared`, FreeTube's database files, an opt-in Obsidian vault) and [`docs/decisions/syncthing-shared-folders.md`](docs/decisions/syncthing-shared-folders.md), the decision record
 - [`docs/history-purge.md`](docs/history-purge.md), the opt-in history purge. Environment repos link it and do not copy it.
 - [`browser/`](browser/README.md), the shared Brave default: policy overrides and Bitwarden, the only offered extension. The contract is [`docs/browser.md`](docs/browser.md). The decision is [`docs/decisions/default-browser-brave.md`](docs/decisions/default-browser-brave.md). Environment repos install the browser.
 - [`docs/commit-identity.md`](docs/commit-identity.md), the no-agent-attribution and no-alternate-identity commit contract, with a reference checker in [`commit-guard/`](commit-guard/README.md). Environment repos install the hooks.
