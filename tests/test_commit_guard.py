@@ -202,6 +202,43 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(self.git("update-ref", "-d", "refs/remotes/origin/feat").returncode, 0)
         self.assertEqual(self.branch_push_check(tip, "0" * 40).returncode, 1)
 
+    def test_commit_from_other_remote_still_checked(self):
+        # A denylisted commit fetched from another remote (work, upstream,
+        # fork) is not on origin, so pushing it to origin is blocked.
+        tip, rsha = self.merged_main_branch()
+        t = Path(self.tmp.name)
+        work = t / "work.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(work)],
+                       env=self.env, check=True)
+        wclone = t / "wclone"
+        subprocess.run(["git", "clone", "-q", str(work), str(wclone)], env=self.env, check=True)
+        wenv = dict(self.env, GIT_AUTHOR_NAME="Alt-Account")
+        (wclone / "w").write_text("w")
+        for c in (["add", "w"], ["commit", "-q", "-m", "work"], ["push", "-q", "origin", "main"]):
+            subprocess.run(["git", *c], cwd=wclone, env=wenv, check=True)
+        self.git("remote", "add", "work", str(work))
+        self.assertEqual(self.git("fetch", "-q", "work").returncode, 0)
+        r = self.git("checkout", "-q", "-b", "from-work", "work/main")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        wsha = self.git("rev-parse", "HEAD").stdout.strip()
+        r = subprocess.run([str(GUARD), "pre-push", "origin", "url"], cwd=self.repo,
+                           env=self.env, capture_output=True, text=True,
+                           input=f"refs/heads/from-work {wsha} refs/heads/from-work {'0' * 40}\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("author matches the local denylist", r.stderr)
+        self.assertIn(f"in commit {wsha}", r.stderr)
+        # Pushing it to the work remote, which already has it, passes.
+        r = subprocess.run([str(GUARD), "pre-push", "work", "url"], cwd=self.repo,
+                           env=self.env, capture_output=True, text=True,
+                           input=f"refs/heads/copy {wsha} refs/heads/copy {'0' * 40}\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # A bare-URL push (no remote name) matches no tracking refs: fails closed.
+        r = subprocess.run([str(GUARD), "pre-push", str(work), str(work)], cwd=self.repo,
+                           env=self.env, capture_output=True, text=True,
+                           input=f"refs/heads/feat {tip} refs/heads/feat {'0' * 40}\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Co-authored-by", r.stderr)
+
     def test_rev_list_failure_refuses_push(self):
         r = self.push_check("f" * 40)
         self.assertEqual(r.returncode, 1)

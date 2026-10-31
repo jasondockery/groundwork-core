@@ -59,13 +59,14 @@ mode_commit_msg() {
   return $rc
 }
 
-# Checks every commit the push would publish that no remote-tracking ref
-# already reaches: local tip, minus the remote's old tip when it is known
-# locally, minus all remote-tracking refs. Commits already published (such as
-# main merged into a PR branch) are skipped. Missing or stale remote-tracking
-# refs only widen the check, so it fails closed.
+# Checks every commit the push would publish that the pushed-to remote does
+# not already have: local tip, minus the remote's old tip when it is known
+# locally, minus that remote's tracking refs. Commits already on that remote
+# (such as its main merged into a PR branch) are skipped. Commits fetched from
+# any other remote are still checked. A push to a bare URL matches no tracking
+# refs, and missing or stale ones only widen the check, so it fails closed.
 mode_pre_push() {
-  local lsha rsha sha rc=0 shas old blocked=0
+  local remote=${1:-} lsha rsha sha rc=0 shas old blocked=0
   while read -r _ lsha _ rsha; do
     case "$lsha" in *[!0]*) ;; *) continue ;; esac   # deleting a ref
     old=
@@ -73,14 +74,14 @@ mode_pre_push() {
        && git cat-file -e "$rsha^{commit}" 2>/dev/null; then
       old="^$rsha"
     fi
-    shas=$(git rev-list "$lsha" ${old:+"$old"} --not --remotes) \
+    shas=$(git rev-list "$lsha" ${old:+"$old"} --not "--remotes=${remote:-*}") \
       || { fail "rev-list failed for $lsha; refusing push"; rc=1; continue; }
     for sha in $shas; do
       check_commit "$sha" || { rc=1; blocked=1; }
     done
   done
   if [ "$blocked" = 1 ]; then
-    fail "only commits that no remote-tracking ref reaches are checked;"
+    fail "commits already on the remote-tracking refs of ${remote:-the remote} are skipped;"
     fail "if a commit above is already on the remote, run git fetch and push again"
   fi
   return $rc
