@@ -44,6 +44,37 @@ the denylist or carries a co-author trailer blocks every such push. Push to a
 named remote instead (`git remote add origin <url>`, then `git push origin`),
 which checks only commits not already on that remote.
 
+## Repository scope
+
+Environment repos scope the hooks to the owner's own repositories with
+`includeIf "hasconfig:remote.*.url:<pattern>"` entries (git 2.36 or newer),
+one per line of [`owner-remote-patterns`](../commit-guard/owner-remote-patterns):
+
+```
+https://github.com/<owner>/**
+git@github.com:<owner>/**
+ssh://git@github.com/<owner>/**
+*:<owner>/**
+ssh://*/<owner>/**
+```
+
+Each owner letter is written as a case class (`[jJ]`), so either case
+matches, and the `/` after the owner keeps a look-alike such as `<owner>2`
+out. In these patterns `*` never matches `/`. That is why `*:<owner>/**`
+covers any scp-style host alias (`git@github-personal:<owner>/repo`), and
+also why none of the first four patterns covers an ssh:// URL with a port.
+`ssh://*/<owner>/**` closes that gap. It covers `ssh://git@github.com:22/<owner>/...`,
+`ssh://git@ssh.github.com:443/<owner>/...` and ssh:// host aliases. It accepts
+any host, the same way `*:` already does. Running the guard on a non-GitHub
+remote is harmless, because it only checks. It makes
+`ssh://git@github.com/<owner>/**` redundant, but that line stays so an
+environment that only adds the new pattern does not need to remove anything.
+
+Accepted gaps, still unguarded: `https://` with a port or with userinfo
+(`https://user@github.com/<owner>/...`), and `git+ssh://` or `ssh+git://`
+schemes. Git does not write these forms itself. A remote set to one of them
+does not get the hooks.
+
 ## Agent attribution settings
 
 Turn attribution off at the source and let the hooks be the backstop.
