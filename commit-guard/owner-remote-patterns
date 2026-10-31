@@ -1,0 +1,13 @@
+# Remote URL patterns that scope the commit guard to the owner's repositories
+# (docs/commit-identity.md, "Repository scope"). Environment repos turn each
+# line into an `includeIf "hasconfig:remote.*.url:<pattern>"` entry that
+# includes the file setting core.hooksPath. Replace <owner> with the GitHub
+# owner, one [xX] class per letter so either case matches. One pattern per
+# line; blank lines and lines starting with # are ignored.
+https://github.com/<owner>/**
+git@github.com:<owner>/**
+ssh://git@github.com/<owner>/**
+*:<owner>/**
+# Any ssh:// host, with or without a port: ssh://git@github.com:22/...,
+# ssh://git@ssh.github.com:443/..., and ssh:// host aliases.
+ssh://*/<owner>/**

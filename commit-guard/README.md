@@ -8,3 +8,5 @@ git hooks. This directory installs nothing and never edits git config.
 - `commit-identity-guard.sh`: `commit-msg`, `pre-push`, and `doctor` modes.
 - `commit-denylist.example`: the denylist format. The real file lives outside
   every repo.
+- `owner-remote-patterns`: the `includeIf hasconfig:remote.*.url` patterns that
+  scope the hooks to the owner's repositories.

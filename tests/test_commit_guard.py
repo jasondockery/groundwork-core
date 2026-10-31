@@ -148,5 +148,62 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(run().returncode, 0, run().stdout)
 
 
+PATTERNS = GUARD.parent / "owner-remote-patterns"
+OWNER = "jasondockery"
+
+
+class ScopeTest(unittest.TestCase):
+    """Real git: which remotes turn on core.hooksPath through the patterns."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        t = Path(self.tmp.name)
+        include = t / ".config" / "groundwork" / "commit-guard.gitconfig"
+        include.parent.mkdir(parents=True)
+        include.write_text("[core]\n\thooksPath = /guard/hooks\n")
+        self.env = {"PATH": os.environ["PATH"], "HOME": str(t),
+                    "XDG_CONFIG_HOME": str(t / ".config"),
+                    "GIT_CONFIG_GLOBAL": str(t / "gitconfig"), "GIT_CONFIG_SYSTEM": "/dev/null"}
+        glob = "".join(f"[{c}{c.upper()}]" if c.upper() != c else c for c in OWNER)
+        for line in PATTERNS.read_text().splitlines():
+            if line.strip() and not line.startswith("#"):
+                key = f"includeIf.hasconfig:remote.*.url:{line.replace('<owner>', glob)}.path"
+                subprocess.run(["git", "config", "--file", self.env["GIT_CONFIG_GLOBAL"],
+                                key, str(include)], env=self.env, check=True)
+        self.repo = t / "repo"
+
+    def hooks_path(self, url):
+        subprocess.run(["rm", "-rf", str(self.repo)], check=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], env=self.env, check=True)
+        subprocess.run(["git", "-C", str(self.repo), "remote", "add", "origin", url],
+                       env=self.env, check=True)
+        r = subprocess.run(["git", "-C", str(self.repo), "config", "--get", "core.hooksPath"],
+                           env=self.env, capture_output=True, text=True)
+        return r.stdout.strip()
+
+    def test_guarded(self):
+        for url in (f"https://github.com/{OWNER}/r.git", f"git@github.com:{OWNER}/r.git",
+                    f"ssh://git@github.com/{OWNER}/r.git", f"git@github-personal:{OWNER}/r.git",
+                    f"ssh://git@github.com:22/{OWNER}/r.git", "ssh://git@github.com:22/JasonDockery/r",
+                    f"ssh://git@ssh.github.com:443/{OWNER}/r.git",
+                    f"ssh://git@github-personal/{OWNER}/r.git", f"ssh://github.com:22/{OWNER}/r"):
+            self.assertEqual(self.hooks_path(url), "/guard/hooks", url)
+
+    def test_not_guarded(self):
+        for url in (f"ssh://git@github.com:22/{OWNER}2/r.git", f"ssh://git@github.com:22/other/{OWNER}/r",
+                    "ssh://git@github.com:22/other/r.git", f"https://github.com/{OWNER}2/r",
+                    # Accepted gaps (docs/commit-identity.md).
+                    f"https://github.com:443/{OWNER}/r.git", f"https://user@github.com/{OWNER}/r",
+                    f"git+ssh://git@github.com:22/{OWNER}/r"):
+            self.assertEqual(self.hooks_path(url), "", url)
+
+    def test_doc_lists_every_pattern(self):
+        doc = (GUARD.parents[1] / "docs" / "commit-identity.md").read_text()
+        for line in PATTERNS.read_text().splitlines():
+            if line.strip() and not line.startswith("#"):
+                self.assertIn(f"\n{line}\n", doc)
+
+
 if __name__ == "__main__":
     unittest.main()
