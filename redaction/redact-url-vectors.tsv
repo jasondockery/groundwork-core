@@ -1,0 +1,50 @@
+# Shared vectors for the credential redaction contract (docs/credential-redaction.md).
+# Columns, tab-separated: input, expected output, note. "#" lines and blank lines are skipped.
+# {{PREFIX:N}} expands at run time to PREFIX plus N letters and digits; see check-redact-url.sh.
+# Lines tagged "limit:" pin a documented limit. They pass today on purpose; a change that
+# closes the limit updates the vector and the doc together.
+
+# Plain remotes are unchanged.
+https://github.com/owner/repo.git	https://github.com/owner/repo.git	plain https
+git@github.com:owner/repo.git	git@github.com:owner/repo.git	scp form, bare git user kept
+ssh://git@github.com/owner/repo.git	ssh://git@github.com/owner/repo.git	ssh form, bare git user kept
+ssh://git@github.com:22/owner/repo.git	ssh://git@github.com:22/owner/repo.git	explicit port kept
+git@github-personal:owner/repo.git	git@github-personal:owner/repo.git	host alias
+/home/user/src/repo	/home/user/src/repo	local path
+
+# Userinfo becomes ***@, cut at the last @ after the scheme.
+https://user:hunter2@github.com/owner/repo.git	https://***@github.com/owner/repo.git	user and password
+https://hunter2@github.com/owner/repo.git	https://***@github.com/owner/repo.git	user only
+https://@github.com/owner/repo.git	https://***@github.com/owner/repo.git	empty userinfo
+https://user:pa/ss@github.com/owner/repo.git	https://***@github.com/owner/repo.git	slash in password (the authority-only cut leaked "pa")
+https://user:pa?ss@github.com/owner/repo.git	https://***@github.com/owner/repo.git	question mark in password
+https://user:pa#ss@github.com/owner/repo.git	https://***@github.com/owner/repo.git	hash in password
+https://user:p@ss@github.com/owner/repo.git	https://***@github.com/owner/repo.git	at sign in password
+ssh://git:hunter2@github.com/owner/repo.git	ssh://***@github.com/owner/repo.git	git user with a password is masked
+Git@github.com:owner/repo.git	***@github.com:owner/repo.git	only the exact user "git" is kept
+user:hunter2@example.com:owner/repo.git	***@example.com:owner/repo.git	scp form with a password
+https://x-access-token:{{ghs_:36}}@github.com/owner/repo.git	https://***@github.com/owner/repo.git	token in userinfo
+https://{{ghp_:40}}@github.com/owner/repo.git	https://***@github.com/owner/repo.git	token as the user
+
+# The query and fragment are dropped.
+https://github.com/owner/repo.git?private_token=hunter2	https://github.com/owner/repo.git	query
+https://github.com/owner/repo.git#hunter2	https://github.com/owner/repo.git	fragment
+https://github.com/owner/repo?a=1#b	https://github.com/owner/repo	query and fragment
+https://user:hunter2@github.com/owner/repo?x=1	https://***@github.com/owner/repo	userinfo and query
+
+# Full-length GitHub tokens are masked anywhere.
+https://example.com/{{ghp_:36}}/repo	https://example.com/***/repo	ghp_ at the minimum length
+https://example.com/{{gho_:36}}/{{ghu_:36}}	https://example.com/***/***	two tokens
+https://example.com/x{{ghr_:50}}y	https://example.com/x***	prefix not word-bounded, run is greedy
+https://example.com/{{github_pat_:22}}/repo	https://example.com/***/repo	github_pat_ at the minimum length
+https://example.com/{{github_pat_:82}}	https://example.com/***	github_pat_ full length
+https://example.com/{{ghp_:35}}/repo	https://example.com/{{ghp_:35}}/repo	one short of full length: not a token, not masked
+https://example.com/{{github_pat_:21}}	https://example.com/{{github_pat_:21}}	one short of full length: not masked
+https://example.com/{{ghx_:36}}	https://example.com/{{ghx_:36}}	unknown gh prefix is not masked
+https://github.com/owner/repo@{{ghp_:36}}	https://***@***	token after a path at sign is still masked
+
+# Known limit: text after the last @ is shown. A non-token secret there can leak.
+https://github.com/owner/repo/@hunter2/x	https://***@hunter2/x	limit: path at sign, the host is hidden and "hunter2" shows
+https://user:pw@github.com/owner/repo@hunter2	https://***@hunter2	limit: the password is hidden but "hunter2" after the path at sign shows
+https://github.com/owner/repo?t=a@hunter2	https://***@hunter2	limit: an at sign in the query moves the cut, "hunter2" shows
+https://github.com/owner/repo@v1	https://***@v1	limit: over-redaction, a path at sign hides the host and path
