@@ -42,6 +42,7 @@ Review the diff, then commit the new submodule pointer. Edit the shared pages he
 - [`docs/history-purge.md`](docs/history-purge.md), the opt-in history purge. Environment repos link it and do not copy it.
 - [`browser/`](browser/README.md), the shared Brave default: policy overrides and Bitwarden, the only offered extension. The contract is [`docs/browser.md`](docs/browser.md). The decision is [`docs/decisions/default-browser-brave.md`](docs/decisions/default-browser-brave.md). Environment repos install the browser.
 - [`docs/commit-identity.md`](docs/commit-identity.md), the no-agent-attribution and no-alternate-identity commit contract, with a reference checker in [`commit-guard/`](commit-guard/README.md). Environment repos install the hooks.
+- [`docs/credential-redaction.md`](docs/credential-redaction.md), how a printed remote URL hides credentials and why a record holds only `owner/repo`, with a reference helper and shared vectors in [`redaction/`](redaction/README.md).
 - [`docs/decisions/worktree-conventions.md`](docs/decisions/worktree-conventions.md), where manual agent worktrees live, how they are named, and how they are removed after merge
 - [`docs/migrating-from-groundwork.md`](docs/migrating-from-groundwork.md), migration for existing macOS, Linux, and Windows/WSL2 users while the old repo remains available
 
