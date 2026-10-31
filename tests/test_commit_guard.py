@@ -135,6 +135,78 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("Co-authored-by", r.stderr)
 
+    def merged_main_branch(self):
+        """Branch already on the remote, then merges a main whose new commit
+        carries a GitHub-style co-author trailer. Returns (branch tip, remote tip)."""
+        t = Path(self.tmp.name)
+        bare = t / "bare.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+                       env=self.env, check=True)
+        self.git("remote", "add", "origin", str(bare))
+        self.commit("base")
+        self.git("push", "-q", "origin", "main")
+        self.git("checkout", "-q", "-b", "feat")
+        rsha = self.commit("feat one")
+        self.assertEqual(self.git("push", "-q", "origin", "feat").returncode, 0)
+        other = t / "other"
+        subprocess.run(["git", "clone", "-q", str(bare), str(other)], env=self.env, check=True)
+        (other / "g").write_text("g")
+        msg = "squash (#1)\n\nCo-authored-by: someone <1+someone@users.noreply.github.com>"
+        for c in (["add", "g"], ["commit", "-q", "-m", msg], ["push", "-q", "origin", "main"]):
+            subprocess.run(["git", *c], cwd=other, env=self.env, check=True)
+        self.assertEqual(self.git("fetch", "-q", "origin").returncode, 0)
+        r = self.git("merge", "-q", "--no-edit", "origin/main")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return self.git("rev-parse", "HEAD").stdout.strip(), rsha
+
+    def branch_push_check(self, local, remote):
+        return subprocess.run([str(GUARD), "pre-push", "origin", "url"], cwd=self.repo,
+                              env=self.env, capture_output=True, text=True,
+                              input=f"refs/heads/feat {local} refs/heads/feat {remote}\n")
+
+    def test_branch_merging_published_main_pushes(self):
+        tip, rsha = self.merged_main_branch()
+        r = self.branch_push_check(tip, rsha)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Also through git itself, with the guard as the pre-push hook.
+        hooks = Path(self.tmp.name) / "hooks"
+        hooks.mkdir()
+        (hooks / "pre-push").write_text(f'#!/bin/sh\nexec "{GUARD}" pre-push "$@"\n')
+        (hooks / "pre-push").chmod(0o755)
+        self.git("config", "core.hooksPath", str(hooks))
+        r = self.git("push", "-q", "origin", "feat")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_new_trailer_commit_after_merge_blocked(self):
+        _, rsha = self.merged_main_branch()
+        bad = self.commit("mine\n\nCo-authored-by: A <a@example.com>")
+        tip = self.commit("tip")
+        r = self.branch_push_check(tip, rsha)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"in commit {bad}", r.stderr)
+        self.assertEqual(r.stderr.count("Co-authored-by trailer"), 1, r.stderr)
+
+    def test_new_branch_merging_published_main_pushes(self):
+        tip, _ = self.merged_main_branch()
+        r = self.branch_push_check(tip, "0" * 40)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_missing_remote_tracking_ref_fails_closed(self):
+        tip, rsha = self.merged_main_branch()
+        self.assertEqual(self.git("update-ref", "-d", "refs/remotes/origin/main").returncode, 0)
+        r = self.branch_push_check(tip, rsha)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Co-authored-by", r.stderr)
+        self.assertIn("git fetch", r.stderr)
+        # No remote-tracking refs at all: a new ref checks all reachable history.
+        self.assertEqual(self.git("update-ref", "-d", "refs/remotes/origin/feat").returncode, 0)
+        self.assertEqual(self.branch_push_check(tip, "0" * 40).returncode, 1)
+
+    def test_rev_list_failure_refuses_push(self):
+        r = self.push_check("f" * 40)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusing push", r.stderr)
+
     def test_doctor(self):
         t = Path(self.tmp.name)
         (t / ".claude").mkdir()

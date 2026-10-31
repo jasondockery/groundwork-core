@@ -33,18 +33,25 @@ Alternate account names and organization names stay in the local file.
 
 `commit-identity-guard.sh commit-msg "$1"` as the `commit-msg` hook; also checks
 the identity git would record. `commit-identity-guard.sh pre-push "$@"` as the
-`pre-push` hook. For a new branch the checked range is every commit not already
-on that remote. `commit-identity-guard.sh doctor` verifies the settings below
+`pre-push` hook. `commit-identity-guard.sh doctor` verifies the settings below
 where they can be read.
 
-Pushing straight to a URL, such as `git push https://example.com/repo.git main`,
-gives the hook no remote name. Git has no remote-tracking refs for a bare URL,
-so a new ref there checks all reachable history, and an old commit that matches
-the denylist or carries a co-author trailer blocks every such push. Push to a
-named remote instead (`git remote add origin <url>`, then `git push origin`),
-which checks only commits not already on that remote.
+For every pushed ref, `pre-push` checks the commits that no remote-tracking ref
+already reaches: the local tip, minus the remote's old tip when it is known
+locally, minus every `refs/remotes/*` ref (`git rev-list <local> ^<old> --not
+--remotes`). The same rule covers a new branch, an update, and a force-push.
+Commits that are already published are not checked again. That matters when a
+PR branch merges `main`: GitHub squash merges can add a `Co-authored-by:`
+trailer to commits on `main`, and the guard must not block a branch for
+carrying them. Deleting a ref checks nothing.
 
-## Repository scope
+The check fails closed. Missing remote-tracking refs (never fetched, deleted,
+or a push straight to a URL in a clone with no remotes) mean more commits are
+checked, not fewer. A commit that is on the remote but not fetched yet is
+checked as well. That is stricter than needed and accepted: run `git fetch`
+and push again. If git cannot compute the list, the push is refused.
+
+## Repository scope## Repository scope
 
 Environment repos scope the hooks to the owner's own repositories with
 `includeIf "hasconfig:remote.*.url:<pattern>"` entries (git 2.36 or newer),
