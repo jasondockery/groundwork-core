@@ -181,11 +181,23 @@ Folder `groundwork-obsidian`, label `Obsidian`, shares one Obsidian vault betwee
 
 ### Saved vault path
 
-Each environment repo asks once for this machine's vault and saves the answer in that machine's local state, outside any git checkout. "No vault on this machine" is a valid saved answer. The answer is an absolute path in that user's home. It may differ between machines, for example `~/Documents/Obsidian/<vault>` on the mini and another folder on the Mac. Groundwork does not guess a path, and does not pick the first vault it finds. This repository never holds a vault path.
+Each environment repo saves this machine's answer under the local state key `syncthing.obsidian_vault`, outside any git checkout. The value is an absolute path, or `none` for "no vault on this machine". A missing key means the question has not been answered yet. `none` is an answer and is never asked again.
 
-Before any write for this folder, check the saved path. Skip `groundwork-obsidian` and say so, and keep going with the other folders, when any of these is true:
+The question is asked during setup when setup has a terminal. When the key is still missing, `groundwork syncthing-pair add` asks before it reaches `groundwork-obsidian`. A run with no terminal does not ask, does not save anything, skips `groundwork-obsidian`, and prints the command below. The other folders continue. One command changes or clears the answer on every environment:
 
-- No vault is saved for this machine.
+```bash
+groundwork syncthing-pair obsidian-vault PATH
+groundwork syncthing-pair obsidian-vault --none
+groundwork syncthing-pair obsidian-vault --clear
+```
+
+`PATH` saves that path after the rules below pass. `--none` saves `none`. `--clear` removes the key, so the next setup or `add` asks again. The command writes only that key. It never changes the Syncthing folder. When `groundwork-obsidian` already exists at another path, the next `add` stops and reports both, as below.
+
+The answer is an absolute path in that user's home. It may differ between machines, for example `~/Documents/Obsidian/<vault>` on the mini and another folder on the Mac. Groundwork does not guess a path, and does not pick the first vault it finds. This repository never holds a vault path.
+
+Before any write for this folder, check the saved path. Every comparison below uses resolved real paths: the saved path, `~/Shared`, the home, every other folder path, and iCloud Drive each go through `realpath` first, so a symlink into iCloud Drive or into `~/Shared` is caught. On macOS the comparison is also case-insensitive, because APFS volumes are case-insensitive by default, so `~/shared` is `~/Shared`. Skip `groundwork-obsidian` and say so, and keep going with the other folders, when any of these is true:
+
+- No vault is saved for this machine, or the saved answer is `none`.
 - The saved path is not absolute, or is not inside that user's home, or is the home itself.
 - The saved path is `~/Shared`, is inside `~/Shared`, or contains `~/Shared`. The vault is never nested inside `~/Shared`, and `~/Shared` is never nested inside the vault.
 - The saved path is, contains, or is inside the path of another folder in this Syncthing config.
@@ -210,7 +222,7 @@ Everything else in `.obsidian` syncs: `app.json`, `appearance.json`, `core-plugi
 
 ### First pairing
 
-`groundwork syncthing-pair add` creates `groundwork-obsidian` as `receiveonly` on every machine. It never creates it as `sendreceive`. A receive-only folder takes the cluster's files and does not send its own. Its existing notes stay on disk and are listed as local changes. When a note at the same path arrives from the cluster, the cluster copy wins and the local copy is kept beside it as a `*.sync-conflict-*` file. That copy is not sent while the folder is receive-only. Nothing in the local vault is deleted and nothing leaves it.
+`groundwork syncthing-pair add` creates `groundwork-obsidian` as `receiveonly` on every machine. It never creates it as `sendreceive`. A receive-only folder takes the cluster's files and does not send its own. Its existing notes stay on disk and are listed as local changes. When a note at the same path arrives from the cluster, the cluster copy wins and the local copy is kept beside it as a `*.sync-conflict-*` file. That copy is not sent while the folder is receive-only. Changes from the cluster, including deletions, still apply here, and each copy they replace goes to the trash can. Groundwork deletes nothing in the local vault, and nothing leaves it while the folder is receive-only.
 
 The person then names the machine whose vault is the source:
 
@@ -218,17 +230,21 @@ The person then names the machine whose vault is the source:
 groundwork syncthing-pair obsidian-promote
 ```
 
-`obsidian-promote` is the only path from `receiveonly` to `sendreceive`. It runs on one machine at a time:
+`obsidian-promote` is the only path from `receiveonly` to `sendreceive`. Promote one machine at a time. Promote the next machine only after the first promote has been seen there: that machine's `globalFiles` is above zero and its local completion is 100.
 
 1. Require the same service, GUI, file-mode, and version checks as `add`. Re-check the saved path rules above. Require `groundwork-obsidian` to exist with the saved path and type `receiveonly`. When the type is already `sendreceive`, exit 0 and change nothing.
-2. Require `GET /rest/db/status?folder=groundwork-obsidian` to be `idle`. Require at least one other device in `folder.devices` to be connected, and `GET /rest/db/completion` for each connected device and this folder to be complete. Print the name of each device that is not connected.
-3. `GET /rest/db/localchanged?folder=groundwork-obsidian`. Those are the files this machine has that the cluster does not, including any `*.sync-conflict-*` copies made above. Print the count and the paths. Never print note contents.
+2. Require this machine to have everything the cluster has. `GET /rest/db/completion?folder=groundwork-obsidian`, with no `device` parameter, must report `completion` 100. `GET /rest/db/status?folder=groundwork-obsidian` must be `idle`, with `needTotalItems` 0 and `pullErrors` 0. At least one other device in `folder.devices` must be connected. Print the name of each device that is not connected. Do not wait on a peer's completion: a receive-only peer never catches up to this machine until this machine sends.
+3. `GET /rest/db/localchanged?folder=groundwork-obsidian` and page through it with `page` and `perpage` until a page comes back short. The default page is 65536 entries. The list is every receive-only change on this machine. Classify each entry:
+   - **new:** `deleted` is false and the cluster has no live copy (`GET /rest/db/file` has no `global`, or `global.deleted` is true). The `*.sync-conflict-*` copies made above are new.
+   - **changed:** `deleted` is false and the cluster has a live copy.
+   - **deleted:** `deleted` is true and the cluster has a live copy.
+   Print the count in each class and the paths. Never print note contents.
 4. When that list is empty, `PATCH /rest/config/folders/groundwork-obsidian` with only `{"type": "sendreceive"}`. Nothing merges, because this machine already matches the cluster.
-5. When that list is not empty, ask once. Say that these files will be sent to every machine that shares the vault, and that a file at the same path on another machine becomes a `*.sync-conflict-*` copy there. Conflict copies are normal files after they are made, so they also reach every machine. When `globalFiles` in step 2's status is above zero, another machine is already a source, and the prompt says this merges two vaults. Only a typed yes promotes. Any other answer, no terminal, or an interrupt leaves the folder `receiveonly` and changes nothing.
+5. When that list is not empty, ask once. Say plainly what each class does on every machine that shares the vault. New files are added there. Changed files replace that note there. Deleted files delete that note there. Each machine keeps the copy it lost once, in its own trash can (`.stversions`). When another machine edits the same note at the same time, Syncthing treats it as a conflict and renames the copy with the older modification time to `*.sync-conflict-*`. Conflict copies are normal files after they are made, so they also reach every machine. When `globalFiles` in step 2's status is above zero, another machine is already a source, and the prompt says this merges two vaults. When it is zero, the prompt says this machine becomes the source and asks the person to confirm no other machine has been promoted. Only a typed yes promotes. Any other answer, no terminal, or an interrupt leaves the folder `receiveonly` and changes nothing.
 
 Groundwork never calls `POST /rest/db/revert` on `groundwork-obsidian`. Revert deletes files that exist only on this machine. A person who wants this machine to match the cluster exactly can press Revert Local Changes in the GUI after reading what it removes.
 
-The first machine promoted has nothing to receive, so its whole vault is the list in step 3 and the prompt is its source confirmation. A machine joining a vault that is already shared starts receive-only, fills from the cluster, and is promoted when its list is empty or the person accepts what is in it. When two machines already hold different vaults, nothing merges until the person types yes on the second one.
+The first machine promoted has nothing to receive, so its whole vault is the list in step 3 and the prompt is its source confirmation. A machine joining a vault that is already shared starts receive-only, fills from the cluster, and is promoted when its list is empty or the person accepts each class in it. When two machines already hold different vaults, nothing merges until the person types yes on the second one.
 
 ### Sharing
 
@@ -244,7 +260,7 @@ groundwork syncthing-pair add --device-id DEVICE_ID --name NAME --magicdns MAGIC
 groundwork syncthing-pair obsidian-promote
 ```
 
-`DEVICE_ID`, `NAME`, and `MAGICDNS` are placeholders. `show` prints this machine's device ID and nothing else. `NAME` is a local label. `MAGICDNS` is the other machine's MagicDNS name, used only to build the two device addresses. `obsidian-promote` is described in [First pairing](#first-pairing).
+`DEVICE_ID`, `NAME`, and `MAGICDNS` are placeholders. `show` prints this machine's device ID and nothing else. `NAME` is a local label. `MAGICDNS` is the other machine's MagicDNS name, used only to build the two device addresses. `obsidian-promote` is described in [First pairing](#first-pairing), and `obsidian-vault` in [Saved vault path](#saved-vault-path).
 
 `add` is safe to run again with the same arguments. A second run that already matches exits 0 and does not create a duplicate device entry or a duplicate share of any folder.
 
@@ -270,4 +286,4 @@ Package installation, the service manager, the Flatpak grant, and the Windows sy
 | `groundwork-windows` | Winget `Syncthing.Syncthing`, on the Windows host. Per-user logon start with `--no-console --no-browser` and `STNODEFAULTFOLDER=1`. | Winget `FreeTube.FreeTube`. Data directory `%APPDATA%\FreeTube`. `PrestonN.FreeTube` is the old publisher id and stops at 0.23.14. Creating the file symlinks needs a user who is allowed to create symlinks; if that permission is missing, set the step aside and retry, and do not mark it finished. |
 | `groundwork-omarchy-mac-arm64` | Pacman `syncthing` via `omarchy pkg add syncthing` (Arch Linux ARM `extra`, aarch64), then `systemctl --user enable --now syncthing.service`. Enable linger on the mini. Confirm this package runs on the mini's 16 KiB pages before treating the install as finished. | The FreeTube package is chosen in that repo. Flatpak `io.freetubeapp.FreeTube` uses `~/.var/app/io.freetubeapp.FreeTube/config/FreeTube/` and the same narrow filesystem grant. A native `freetube-bin` install uses `~/.config/FreeTube`. Use the path that matches the package that actually launches. |
 
-Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, and the FreeTube wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. The wrapper takes an exclusive non-blocking lock before any `lstat`, move, link, or `PATCH` and holds it in the waiting process until resume. A direct binary launch is outside this contract. Each repo shows the one-machine warning on the FreeTube cheatsheet or app list. Each repo also asks once for the saved Obsidian vault path, keeps it in local state outside any git checkout, and implements `groundwork syncthing-pair obsidian-promote`. A machine with no saved vault skips `groundwork-obsidian`. The FreeTube cheatsheet says Quit, not close the window. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.
+Each repo also implements `groundwork syncthing-pair` as specified above, the listen-address apply, and the FreeTube wrapper as the only menu, Dock, Start Menu, Spotlight, and `flatpak run io.freetubeapp.FreeTube` command for the package. The wrapper takes an exclusive non-blocking lock before any `lstat`, move, link, or `PATCH` and holds it in the waiting process until resume. A direct binary launch is outside this contract. Each repo shows the one-machine warning on the FreeTube cheatsheet or app list. Each repo also asks for the Obsidian vault at setup or `add`, keeps it under the local state key `syncthing.obsidian_vault` outside any git checkout, and implements `groundwork syncthing-pair obsidian-vault` and `groundwork syncthing-pair obsidian-promote`. A machine with no saved vault skips `groundwork-obsidian`. The FreeTube cheatsheet says Quit, not close the window. Tests in those repos belong there. This repo checks that the contract still says these things and that it contains no device ID or API key.

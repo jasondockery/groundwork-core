@@ -435,10 +435,30 @@ class SyncthingDocsTest(unittest.TestCase):
             "never sets `autoAcceptFolders` or `introducer` to `true`",
             "never accepts a pending device or a pending folder",
             "This repository never holds a vault path.",
+            "`syncthing.obsidian_vault`",
+            "groundwork syncthing-pair obsidian-vault --clear",
+            "A run with no terminal does not ask, does not save anything, skips `groundwork-obsidian`",
+            "uses resolved real paths",
+            "case-insensitive",
+            "Promote one machine at a time.",
+            "with no `device` parameter, must report `completion` 100",
+            "`needTotalItems` 0 and `pullErrors` 0",
+            "Do not wait on a peer's completion",
+            "page through it with `page` and `perpage`",
+            "65536",
+            "**new:**",
+            "**changed:**",
+            "**deleted:**",
+            "Changed files replace that note there. Deleted files delete that note there.",
+            "in its own trash can (`.stversions`)",
+            "renames the copy with the older modification time",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, section)
         self.assertNotIn("as `sendreceive` on", section)
+        self.assertNotIn("for each connected device and this folder to be complete", section)
+        self.assertNotIn("becomes a `*.sync-conflict-*` copy there", section)
+        self.assertNotIn("Nothing in the local vault is deleted", section)
         self.assertLess(
             text.index("apply the [saved vault path](#saved-vault-path) rules first"),
             text.index("8. Exit 0."),
