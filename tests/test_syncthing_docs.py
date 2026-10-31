@@ -452,6 +452,14 @@ class SyncthingDocsTest(unittest.TestCase):
             "Changed files replace that note there. Deleted files delete that note there.",
             "in its own trash can (`.stversions`)",
             "renames the copy with the older modification time",
+            "always returns a `global` object",
+            "An empty `global.name` means the cluster has no entry for that path.",
+            "a live copy is `global.deleted` false and `global.invalid` false",
+            "**new:** `deleted` is false and there is no live copy.",
+            "**changed:** `deleted` is false and there is a live copy.",
+            "**deleted:** `deleted` is true and there is a live copy.",
+            "A deleted entry with no live copy is a local-only deletion.",
+            "left out of every class, out of the prompt, and out of the count",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, section)
@@ -459,6 +467,8 @@ class SyncthingDocsTest(unittest.TestCase):
         self.assertNotIn("for each connected device and this folder to be complete", section)
         self.assertNotIn("becomes a `*.sync-conflict-*` copy there", section)
         self.assertNotIn("Nothing in the local vault is deleted", section)
+        self.assertNotIn("has no `global`", section)
+        self.assertNotIn("or `global.deleted` is true)", section)
         self.assertLess(
             text.index("apply the [saved vault path](#saved-vault-path) rules first"),
             text.index("8. Exit 0."),
