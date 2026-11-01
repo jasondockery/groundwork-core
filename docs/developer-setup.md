@@ -1,6 +1,6 @@
 # One developer setup across the Groundwork family
 
-Personal and managed machines use the same developer tools. Device policy and supported platform determine what can run; a work/personal label does not decide which coding agents are available. Each provider still requires local sign-in, and credentials and employer-specific configuration stay outside the repositories.
+Every machine gets the same developer tools. Device policy and supported platform determine what can run. Each provider still requires local sign-in, and credentials and employer-specific configuration stay outside the repositories.
 
 | Surface | Owner and desired setup |
 | --- | --- |

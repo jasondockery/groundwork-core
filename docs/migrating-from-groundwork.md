@@ -53,7 +53,7 @@ chezmoi --source "$new_engine" apply
 
 If it fails, stop and retain the error; partial application is not a completed migration. Do not start `update-all` against the old source while repairing the new one.
 
-Open a fresh terminal and verify shell startup, Git identity for personal/work repositories, SSH access, the selected multiplexer, Omarchy-aligned pane/tab/session keys, T3 Code Nightly, Herdr, and one small provider task. Follow the destination's Tailscale guide and test the required remote connections in both directions. Confirm local overlays and app data remain available.
+Open a fresh terminal and verify shell startup, per-repository Git identity, SSH access, the selected multiplexer, Omarchy-aligned pane/tab/session keys, T3 Code Nightly, Herdr, and one small provider task. Follow the destination's Tailscale guide and test the required remote connections in both directions. Confirm local overlays and app data remain available.
 
 After those checks pass, run `chezmoi edit-config` and change only the root `sourceDir` to the new engine checkout. Keep existing data/profile fields and unrelated config intact. Then run `chezmoi source-path` to confirm it resolves to the new engine and `chezmoi diff` to confirm the default command now uses that source. `update-all` must resolve the new source before you use it again.
 
