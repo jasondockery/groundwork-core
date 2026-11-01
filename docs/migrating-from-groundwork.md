@@ -18,7 +18,7 @@ Linux and Windows currently route to the shared provisioning implementation in a
 
 Run `chezmoi source-path` to locate the actual old source; do not assume it is `~/code/groundwork`. Inspect its Git status and preserve uncommitted edits with your normal Git workflow or a separate backup. Leave that checkout in place throughout migration.
 
-Make a private backup outside both checkouts of your chezmoi configuration directory, any custom config path, and the current managed settings. The standard configuration directory is `${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi`. Keep its permissions private: it contains stored identity and profile answers. Existing Groundwork backups and `groundwork-restore` remain your recovery path for files it previously managed; inspect their documented coverage before relying on them.
+Make a private backup outside both checkouts of your chezmoi configuration directory, any custom config path, and the current managed settings. The standard configuration directory is `${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi`. Keep its permissions private: it contains stored identity and setup answers. Existing Groundwork backups and `groundwork-restore` remain your recovery path for files it previously managed; inspect their documented coverage before relying on them.
 
 Retain `~/.ssh`, SSH agents/Keychain entries, Git local overlays, `~/.zshrc.local`, `~/.config/tmux/tmux.local.conf`, user-owned app settings, and provider credentials on the machine. Do not copy those into a repo. Port useful source edits deliberately; copying the entire old `home/` tree would replace the new defaults with historical ones.
 
@@ -30,7 +30,7 @@ Inspect the engine's changes and keep it clean before proceeding. In the command
 
 ## Preview with existing answers
 
-Use the existing chezmoi config so current profile choices, identities, and overrides remain in effect:
+Use the existing chezmoi config so saved answers, identities, and overrides remain in effect:
 
 ```bash
 new_engine="$HOME/code/groundwork-mac"

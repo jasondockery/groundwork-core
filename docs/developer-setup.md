@@ -10,7 +10,7 @@ Every machine gets the same developer tools. Device policy and supported platfor
 | Omarchy on Apple Silicon | `groundwork-omarchy-mac-arm64` preserves Omarchy’s package feed and tool configuration. Syncthing comes from the Arch package and runs as a user service. The mini is the always-on peer. The shared chezmoi engine is never applied there. Native Linux uses its supported apps and web access for services without official Linux desktop apps. |
 | Shared guidance | This repository owns shared explanations, including the [Syncthing shared-folder contract](syncthing.md), not package installation or account enrollment. See [local model workflows](local-models.md) for evaluation; environment repositories own runtime installation and model downloads. |
 
-Git identity, optional personal apps, C#/infrastructure extensions, container backend, and stable/preview release posture are independent choices. Existing valid preferences are preserved during migration. A stored historical `work` flag is compatibility input, not an ongoing tool exclusion.
+Git identity, optional personal apps, C#/infrastructure extensions, container backend, and current/preview release posture are independent choices. Existing valid preferences are preserved during migration. A stored historical `work` flag is compatibility input, not an ongoing tool exclusion.
 
 Use the environment repository’s installer and updater. Homebrew refreshes itself and the eligible installed inventory in its environment; Omarchy owns its native updates; Windows apps keep their host updater. Integrity checks, release-age rules, package pins, and device policy still apply. Latest available does not establish compatibility or successful local authentication.
 
