@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Budget: the whole job finishes in about a minute; the tests take seconds.
+# timeout-minutes only guards against a hang and is never raised to absorb growth.
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck tracked shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 -r shellcheck -x
+      - name: Python tests
+        run: python3 -I -m unittest discover -s tests
+      - name: Compass projection
+        run: node .compass/check-projection.mjs
