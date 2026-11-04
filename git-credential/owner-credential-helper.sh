@@ -5,22 +5,34 @@
 #   owner-credential-helper.sh get|store|erase   (git credential protocol)
 #   owner-credential-helper.sh gh-path           (print the gh it would run)
 #
-# On `get` for https://github.com/<owner>/..., it looks up
-# `git config ghaccount.<owner>` and prints that account's token from
-# `gh auth token -u <account>`. Anything else prints nothing and exits 0, so
-# the next helper in the chain (gh's own) answers. The token is written only
-# to stdout, in protocol form. `store` and `erase` do nothing.
+# On `get` for https://github.com/<owner>/..., it looks up the global
+# `ghaccount.<owner>` and prints that account's token from
+# `gh auth token -u <account>`. An owner with no mapping, another host, or no
+# path prints nothing and exits 0, so the next helper (gh's own) answers. A
+# mapped owner whose token cannot be read fails closed: it prints `quit=1`, so
+# git stops instead of trying the active gh account, and names the owner and
+# account on stderr. The token is written only to stdout, in protocol form.
+# `store` and `erase` do nothing. Only the global config (with its includes)
+# is read, never a repository's own config.
 set -u
 
-# gh lookup order: GROUNDWORK_GH, `git config groundwork.ghPath`, the mise
-# shim (stable across gh upgrades), then PATH.
+gcfg() { git config --global --includes "$@" 2>/dev/null; }
+
+# gh lookup order: GROUNDWORK_GH, global `groundwork.ghPath`, the mise shim
+# (stable across gh upgrades), then PATH.
 gh_path() {
   local p
-  for p in "${GROUNDWORK_GH:-}" "$(git config --get groundwork.ghPath 2>/dev/null)" \
+  for p in "${GROUNDWORK_GH:-}" "$(gcfg --get groundwork.ghPath)" \
            "$HOME/.local/share/mise/shims/gh"; do
     if [ -n "$p" ] && [ -x "$p" ]; then printf '%s\n' "$p"; return 0; fi
   done
   command -v gh 2>/dev/null
+}
+
+refuse() {
+  printf 'owner-credential-helper: owner %s maps to gh account %s, but %s\n' "$1" "$2" "$3" >&2
+  printf 'owner-credential-helper: fix: gh auth login -h github.com   # sign in as %s\n' "$2" >&2
+  printf 'quit=1\n'
 }
 
 get() {
@@ -38,11 +50,11 @@ get() {
   # A git config variable name: a letter, then letters, digits and hyphens.
   case "$owner" in [A-Za-z]*) ;; *) return 0 ;; esac
   case "$owner" in *[!A-Za-z0-9-]*) return 0 ;; esac
-  account=$(git config --get "ghaccount.$owner" 2>/dev/null) || return 0
-  case "$account" in ''|-*|*[!A-Za-z0-9-]*) return 0 ;; esac
-  gh=$(gh_path) || return 0
-  token=$(GH_PROMPT_DISABLED=1 "$gh" auth token -h github.com -u "$account" </dev/null 2>/dev/null) || return 0
-  case "$token" in ''|*[[:space:]]*) return 0 ;; esac
+  account=$(gcfg --get "ghaccount.$owner") || return 0
+  case "$account" in ''|-*|*[!A-Za-z0-9-]*) refuse "$owner" "$account" "that is not an account name"; return 0 ;; esac
+  gh=$(gh_path) || { refuse "$owner" "$account" "gh was not found"; return 0; }
+  token=$(GH_PROMPT_DISABLED=1 "$gh" auth token -h github.com -u "$account" </dev/null 2>/dev/null) || token=
+  case "$token" in ''|*[[:space:]]*) refuse "$owner" "$account" "gh has no token for it"; return 0 ;; esac
   printf 'username=%s\npassword=%s\n' "$account" "$token"
 }
 

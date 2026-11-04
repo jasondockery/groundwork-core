@@ -3,17 +3,16 @@
 Reference scripts that make HTTPS the default GitHub transport for people and
 agents, and pick the gh account from the repository owner. Environment repos
 call them from the `core` pin. This directory holds no account names; the map
-is passed in by the installer and lives in the user's global git config.
+is passed in by the installer and lives in the user's git config.
 
 - `owner-credential-helper.sh`: a git credential helper. On `get` for
-  `https://github.com/<owner>/...` it reads `git config ghaccount.<owner>` and
-  answers with `gh auth token -u <account>`. Anything else (another host, no
-  `path=`, an owner with no mapping, gh failing) prints nothing, so the next
-  helper answers. `store` and `erase` do nothing. `gh-path` prints the gh it
-  would run.
+  `https://github.com/<owner>/...` it reads the global `ghaccount.<owner>` and
+  answers with `gh auth token -u <account>`. `store` and `erase` do nothing.
+  `gh-path` prints the gh it would run.
 - `setup-github-https.sh`: idempotent setup. Installers call it.
-- `check-github-https.sh`: read-only doctor check with `ok:`, `FAIL:` and
-  `fix:` lines. Exits 1 on any failure.
+- `check-github-https.sh`: read-only doctor check with `ok:`, `note:`, `FAIL:`
+  and `fix:` lines. Exits 1 on any failure.
+- `github-https-lib.sh`: shared by the two scripts above; not run directly.
 
 ## Why HTTPS, and why an owner helper
 
@@ -22,7 +21,24 @@ gh kept working, so HTTPS is the agent default and SSH remotes are rewritten to
 it. `gh auth git-credential` only serves the active gh account; a username in
 the remote URL does not choose the account, and GitHub's redirect drops it
 anyway. The owner helper routes by who owns the repository, wherever the clone
-lives, and falls through to gh for every owner it does not know.
+lives.
+
+## What the helper answers
+
+| Request | Result |
+|---|---|
+| github.com, owner mapped, gh has a token for the account | `username=<account>`, `password=<token>` |
+| github.com, owner mapped, no token (logged out, gh missing) | `quit=1`: git stops with "credential helper ... told us to quit". One stderr line names the owner and account and the fix, `gh auth login -h github.com` |
+| github.com, owner not mapped, or not mappable | nothing; gh's helper answers with the active account |
+| another host, or no `path=` | nothing |
+
+A mapped owner fails closed on purpose: falling through would push or fetch
+as whichever account happens to be active. The token goes only to the
+protocol's stdout; nothing is logged.
+
+The helper reads `ghaccount.*` and `groundwork.ghPath` from the global config
+and the files it includes (`git config --global --includes`), never from a
+repository's own config, so a cloned repository cannot choose an account.
 
 ## What setup writes
 
@@ -32,14 +48,19 @@ core/git-credential/setup-github-https.sh \
   --ssh-alias github-personal
 ```
 
-In the global git config (`git config --global`, so `GIT_CONFIG_GLOBAL` is
-honored):
+It first copies the helper to a stable path,
+`${XDG_DATA_HOME:-~/.local/share}/groundwork/git-credential/owner-credential-helper.sh`
+(written to a temp file and moved into place, mode 0755, skipped when the
+bytes already match), so the config does not point into a checkout that can
+move. `--helper PATH` uses an existing helper instead. Then, in the global git
+config (`git config --global`, so `GIT_CONFIG_GLOBAL` is honored) or the file
+named by `--file`:
 
 ```ini
 [credential "https://github.com"]
 	useHttpPath = true
 	helper =
-	helper = /path/to/core/git-credential/owner-credential-helper.sh
+	helper = /home/me/.local/share/groundwork/git-credential/owner-credential-helper.sh
 	helper = !/home/me/.local/share/mise/shims/gh auth git-credential
 [url "https://github.com/"]
 	insteadOf = git@github.com:
@@ -53,28 +74,58 @@ honored):
 
 It also sets gh's `git_protocol` to `https`. A second run with the same
 arguments changes nothing and says so. An existing helper chain for
-`https://github.com` (for example the one `gh auth setup-git` writes) is
-replaced, and setup reports how many entries it replaced. It never reads or
-edits ssh config; SSH keys and host aliases keep working for anyone who calls
-them directly. If setup is interrupted, run it again.
+`https://github.com` in the target file (for example the one
+`gh auth setup-git` writes) is replaced, and setup reports how many entries it
+replaced. It never reads or edits ssh config; SSH keys and host aliases keep
+working for anyone who calls them directly. If setup is interrupted, run it
+again.
+
+Afterwards setup rebuilds the chain git really runs for github.com from the
+system and global scopes, following includes. If a helper it does not own
+would still run, for example a `[credential] helper = osxkeychain` later in the
+file, which would be sent every token git approves, it names that entry and
+exits 1 instead of printing "already configured". With `--file`, it also exits
+1 until that file is included from the global config.
 
 The helper order matters. The empty `helper =` resets the list, so a helper
 from a wider scope cannot answer first. On macOS that is the `osxkeychain`
 helper Apple's and Homebrew's git configure system-wide; without the reset it
 can serve a cached token for the wrong account before the owner helper runs.
 
-gh is found by a stable path, in this order: `GROUNDWORK_GH`, then
-`git config groundwork.ghPath`, then the mise shim
-`~/.local/share/mise/shims/gh`, then `gh` on `PATH`. `gh auth setup-git` under
-mise writes the versioned install path, which breaks on the next gh upgrade;
-the doctor flags that path.
+gh is found in this order: `GROUNDWORK_GH`, then the global
+`groundwork.ghPath`, then the mise shim `~/.local/share/mise/shims/gh`, then
+`gh` on `PATH`. `gh auth setup-git` under mise writes the versioned install
+path, which breaks on the next gh upgrade, so setup writes the shim and the
+doctor flags a versioned path. The shim picks the gh version from the current
+directory's mise config, so a repository that pins another gh gets that one.
+When that matters, pin an absolute path with `GROUNDWORK_GH` or
+`git config --global groundwork.ghPath /path/to/gh`.
+
+### chezmoi and other managed gitconfigs
+
+When `~/.gitconfig` is generated (groundwork-mac renders it from
+`home/dot_gitconfig.tmpl`), writing into it gets reverted on the next apply.
+Use a separate file instead, include it from the template, and drop the
+template's own github.com helper chain:
+
+```ini
+# in the managed ~/.gitconfig
+[include]
+	path = ~/.config/groundwork/github.gitconfig
+```
+
+```sh
+core/git-credential/setup-github-https.sh --file ~/.config/groundwork/github.gitconfig --map ...
+core/git-credential/check-github-https.sh --file ~/.config/groundwork/github.gitconfig --root ~/code
+```
 
 ## Map keys
 
 `ghaccount.<owner>` is a git config key, so the owner must start with a letter
 and hold only letters, digits and hyphens; git compares it without regard to
 case, as GitHub does. Setup rejects other owners. An owner that starts with a
-digit cannot be mapped and falls through to gh's active account.
+digit cannot be mapped and falls through to gh's active account; the doctor
+notes it.
 
 ## Rotate or replace a token
 
@@ -100,25 +151,37 @@ To add an account, `gh auth login -h github.com --git-protocol https`, then add
 ## Doctor
 
 ```sh
-core/git-credential/check-github-https.sh --root ~/code ~/worktrees/repo/lane
+core/git-credential/check-github-https.sh [--file PATH] [--ssh-alias HOST]... \
+  --root ~/code ~/worktrees/repo/lane
 ```
 
-It checks `useHttpPath`, the helper chain and its gh path, gh's
-`git_protocol`, and that every mapped account appears in `gh auth status`. For
-the repositories passed in, and those up to three levels under each `--root`,
-it flags SSH GitHub remotes that no `insteadOf` rewrites and, when more than
-one gh account is logged in, owners with no mapping. Each failure is followed
-by the command that fixes it. Only account names are read from
-`gh auth status`; its text is never printed.
+It checks:
 
-Pass `--helper PATH` to both scripts when the installer copies the helper
-somewhere else.
+- `useHttpPath` for github.com;
+- the chain in the target file (empty reset, helper, gh), that the helper it
+  names exists and is executable, and that its gh path exists and is not a
+  versioned mise path;
+- the chain git really runs, across the system and global scopes and their
+  includes: any helper after gh's, or ahead of the owner helper, is a failure,
+  and so is a `--file` that the global config does not include;
+- gh's `git_protocol`, and that every mapped account appears in
+  `gh auth status` (only account names are read from it; its text is never
+  printed);
+- that each `--ssh-alias` is rewritten to `https://github.com/`;
+- for the repositories passed in, and those up to three levels under each
+  `--root`: SSH GitHub remotes no `insteadOf` rewrites, a `pushInsteadOf` that
+  sends pushes back to SSH, and, when more than one gh account is logged in,
+  owners with no mapping.
+
+Each failure is followed by the command that fixes it.
 
 ## Calling it from a platform repo
 
 The platform installer runs `setup-github-https.sh` with its owner map and SSH
 aliases after gh is installed and logged in, and runs `check-github-https.sh`
-from its own doctor. Account names stay in the platform repo or the machine,
-not here. Removing the setup means unsetting the keys above
-(`git config --global --unset-all credential.https://github.com.helper`, the
-`url.https://github.com/.insteadOf` values, and the `ghaccount` section).
+with the same `--file` and `--ssh-alias` from its own doctor. Account names stay
+in the platform repo or the machine, not here. Removing the setup means
+unsetting the keys above (`git config --global --unset-all
+credential.https://github.com.helper`, the `url.https://github.com/.insteadOf`
+values, and the `ghaccount` section), or deleting the `--file` and its include,
+and removing the installed helper.
