@@ -16,7 +16,9 @@
 # is read, never a repository's own config.
 set -u
 
-gcfg() { git config --global --includes "$@" 2>/dev/null; }
+# Read from outside any repository, so includeIf and a repository's own
+# config never change the answer; setup and the doctor read the same way.
+gcfg() { (cd / && env -u GIT_DIR -u GIT_WORK_TREE git config --global --includes "$@" 2>/dev/null); }
 
 # gh lookup order: GROUNDWORK_GH, global `groundwork.ghPath`, the mise shim
 # (stable across gh upgrades), then PATH.
@@ -46,14 +48,23 @@ get() {
     esac
   done
   # Git applies the github.com chain to GitHub.com and github.com:443 too.
+  protocol=$(printf '%s' "$protocol" | tr '[:upper:]' '[:lower:]')
   host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
   host=${host%:443}
-  [ "$protocol" = https ] && [ "$host" = github.com ] || return 0
+  [ "$protocol" = https ] && [ "$host" = github.com ] && [ -n "$path" ] || return 0
   owner=${path%%/*}
   # A git config variable name: a letter, then letters, digits and hyphens.
   case "$owner" in [A-Za-z]*) ;; *) return 0 ;; esac
   case "$owner" in *[!A-Za-z0-9-]*) return 0 ;; esac
-  account=$(gcfg --get "ghaccount.$owner") || return 0
+  # Exit 1 means no mapping; anything higher is a config error: fail closed.
+  account=$(gcfg --get "ghaccount.$owner") || {
+    [ $? -eq 1 ] || {
+      printf 'owner-credential-helper: cannot read ghaccount.%s; fix: run git config --global --includes --get ghaccount.%s to see the error\n' \
+        "$owner" "$owner" >&2
+      printf 'quit=1\n'
+    }
+    return 0
+  }
   case "$account" in ''|-*|*[!A-Za-z0-9-]*) refuse "$owner" "$account" "that is not an account name"; return 0 ;; esac
   gh=$(gh_path) || { refuse "$owner" "$account" "gh was not found"; return 0; }
   token=$(GH_PROMPT_DISABLED=1 "$gh" auth token -h github.com -u "$account" </dev/null 2>/dev/null) || token=

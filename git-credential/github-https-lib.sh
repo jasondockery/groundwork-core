@@ -2,10 +2,14 @@
 # Target: bash 3.2+. Shared by setup-github-https.sh and check-github-https.sh;
 # source it, do not run it. Problem reporters print PROBLEM<TAB>FIX lines.
 
+tab=$'\t'
 q() { printf '%q' "$1"; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # git outside any repository, so a repository's own config never counts.
 nrepo() { (cd / && env -u GIT_DIR -u GIT_WORK_TREE git "$@"); }
+
+# The Groundwork-owned file setup regenerates and the global config includes.
+default_file() { printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/groundwork/github-https.gitconfig"; }
 
 # The file `git config --global` writes, by git's own rule.
 global_file() {
@@ -29,11 +33,12 @@ EOF
 }
 
 # matches_github SUBSECTION: does credential.<SUBSECTION>.helper apply to
-# https://github.com/<owner>/<repo>? Scheme and host compare without case; a
-# wildcard is assumed to match.
+# https://github.com/<owner>/<repo>? Scheme and host compare without case,
+# userinfo and :443 are ignored, and a wildcard is assumed to match.
 matches_github() {
   local s
   s=$(lower "$1")
+  case "$s" in https://*@*) s=https://${s#https://*@} ;; esac
   case "$s" in https://github.com:443*) s=https://github.com${s#https://github.com:443} ;; esac
   case "$s" in ''|*'*'*|https://github.com|https://github.com/*) return 0 ;; esac
   return 1
@@ -47,7 +52,7 @@ chain_problems() {
   local dir=$1 helper=$2 ghh=$3 line o rest k v sub list='' reset='' seen=0 n=0 rc=0 done_=''
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    o=${line%%$'\t'*} rest=${line#*$'\t'}
+    o=${line%%"$tab"*} rest=${line#*"$tab"}
     k=${rest%% *} v=${rest#* }
     [ "$k" = "$rest" ] && v=''
     sub=${k#credential.} sub=${sub%.helper}
@@ -55,9 +60,9 @@ chain_problems() {
     matches_github "$sub" || continue
     o=${o#file:}
     case "$o" in /*) ;; *) [ -z "$dir" ] || o=$dir/$o ;; esac
-    if [ -z "$v" ]; then list='' reset=$o$'\t'$k; continue; fi
+    if [ -z "$v" ]; then list='' reset=$o$tab$k; continue; fi
     [ "$v" = "$helper" ] && seen=1
-    list=$list$o$'\t'$k$'\t'$v$'\n'
+    list=$list$o$tab$k$tab$v$'\n'
   done <<EOF
 $(if [ -n "$dir" ]; then git -C "$dir" config --includes --show-origin --get-regexp '^credential\..*helper$'
   else nrepo config --includes --show-origin --get-regexp '^credential\..*helper$'; fi 2>/dev/null)
@@ -69,15 +74,15 @@ EOF
     rc=1
   }
   case "$list" in
-    *$'\t'"$helper"$'\n'*) ;;
+    *$tab"$helper"$'\n'*) ;;
     *) if [ "$seen" = 1 ] && [ -n "$reset" ]; then
-         report "resets the github.com chain after the owner helper" "${reset%%$'\t'*}" "${reset#*$'\t'}" \
+         report "resets the github.com chain after the owner helper" "${reset%%"$tab"*}" "${reset#*"$tab"}" \
            "   # if a chezmoi template writes it, drop that block from the template"
        elif [ "$seen" = 0 ]; then
          printf 'git does not run the owner helper for github.com\t%s\n' "$4"; rc=1
        fi ;;
   esac
-  while IFS=$'\t' read -r o k v; do
+  while IFS=$tab read -r o k v; do
     [ -n "$k" ] || continue
     n=$((n + 1))
     if [ "$n" -eq 1 ] && [ "$v" = "$helper" ]; then continue; fi
@@ -99,7 +104,7 @@ EOF
 # An empty WANT means the value git uses now.
 map_problems() {
   local owner=$1 want=$2 target=$3 o v n=0 last='' all='' fixes=''
-  while IFS=$'\t' read -r o v; do
+  while IFS=$tab read -r o v; do
     [ -n "$o" ] || continue
     n=$((n + 1)) last=$v
     all="$all${all:+, }$v (${o#file:})"
@@ -108,7 +113,7 @@ $(nrepo config --global --includes --show-origin --get-all "ghaccount.$owner" 2>
 EOF
   [ -n "$want" ] || want=$last
   [ "$n" -le 1 ] && [ "$last" = "$want" ] && return 0
-  while IFS=$'\t' read -r o v; do
+  while IFS=$tab read -r o v; do
     o=${o#file:}
     [ -n "$o" ] || continue
     if [ "$v" != "$want" ] || ! [ "$o" -ef "$target" ]; then
@@ -118,7 +123,7 @@ EOF
   done <<EOF
 $(nrepo config --global --includes --show-origin --get-all "ghaccount.$owner" 2>/dev/null)
 EOF
-  [ -n "$fixes" ] || fixes="git config --file $(q "$target") --replace-all ghaccount.$owner $want"
+  [ -n "$fixes" ] || fixes="rerun setup-github-https.sh"
   printf 'ghaccount.%s has more than one value or not the expected one; the helper uses %s; values: %s\t%s\n' \
     "$owner" "$last" "$all" "$fixes"
   return 1

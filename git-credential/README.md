@@ -3,7 +3,7 @@
 Reference scripts that make HTTPS the default GitHub transport for people and
 agents, and pick the gh account from the repository owner. Environment repos
 call them from the `core` pin. This directory holds no account names; the map
-is passed in by the installer and lives in the user's git config.
+is passed in by the installer and lives in a Groundwork-owned git config file.
 
 - `owner-credential-helper.sh`: a git credential helper. On `get` for
   `https://github.com/<owner>/...` it reads the global `ghaccount.<owner>` and
@@ -30,15 +30,18 @@ lives.
 | github.com (any case, with or without `:443`), owner mapped, gh has a token for the account | `username=<account>`, `password=<token>` |
 | github.com, owner mapped, no token (logged out, gh missing) | `quit=1`: git stops with "credential helper ... told us to quit". One stderr line names the owner and account and the fix, `gh auth login -h github.com` |
 | github.com, owner not mapped, or not mappable | nothing; gh's helper answers with the active account |
-| another host, or no `path=` | nothing |
+| another host, or an empty or missing `path=` | nothing |
 
 A mapped owner fails closed on purpose: falling through would push or fetch
 as whichever account happens to be active. The token goes only to the
 protocol's stdout; nothing is logged.
 
 The helper reads `ghaccount.*` and `groundwork.ghPath` from the global config
-and the files it includes (`git config --global --includes`), never from a
-repository's own config, so a cloned repository cannot choose an account.
+and the files it includes (`git config --global --includes`), run from outside
+any repository, so neither a repository's own config nor an `includeIf` for
+its directory can choose an account. Setup and the doctor read the map the same
+way. If git cannot read the config at all (exit 2 or more), the helper prints
+`quit=1` rather than treating the owner as unmapped.
 
 ## What setup writes
 
@@ -48,20 +51,33 @@ core/git-credential/setup-github-https.sh \
   --ssh-alias github-personal
 ```
 
-It first copies the helper to a stable path,
-`${XDG_DATA_HOME:-~/.local/share}/groundwork/git-credential/owner-credential-helper.sh`
-(written to a temp file and moved into place, mode 0755, skipped when the
-bytes already match), so the config does not point into a checkout that can
-move. `--helper PATH` uses an existing helper instead. Then it edits one file:
-the one `git config --global` writes (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig`,
-else `$XDG_CONFIG_HOME/git/config` when only that exists), or the absolute path
-given with `--file` (a relative `--file` is rejected with exit 64). Every edit
-goes to a temp copy in the same directory with the same mode, which then
-replaces the file in one rename, so an interrupted run leaves the old file
-whole. A symlinked target is refused; pass the real file with `--file`. The
-file gets:
+Setup never rewrites the user's own gitconfig. It writes two files it owns
+and adds one include line:
+
+1. It copies the helper to
+   `${XDG_DATA_HOME:-~/.local/share}/groundwork/git-credential/owner-credential-helper.sh`
+   (mode 0755, skipped when the bytes already match), so the config never
+   points into a checkout that can move. `--helper PATH` uses an existing
+   helper instead.
+2. It regenerates the Groundwork-owned file,
+   `${XDG_CONFIG_HOME:-~/.config}/groundwork/github-https.gitconfig`, or the
+   absolute path given with `--file` (a relative one exits 64). The file
+   holds only these keys and is rebuilt from the arguments alone, so the
+   installer passes the whole map every time; an owner it leaves out is
+   dropped. The content goes to `<file>.lock`, created exclusively, and is
+   renamed over the file only when the bytes differ. A second setup that finds
+   the lock stops; remove a stale lock by hand. Ctrl+C or SIGTERM stops before
+   the rename, so the old file stays whole.
+3. If the global config does not already include that file, setup adds
+   `include.path` with `git config --global --add`, git's own locked writer,
+   which leaves the rest of the file as it was. When the global file is a
+   symlink or managed by chezmoi, setup does not touch it: it prints the
+   `[include]` lines to add to the source and exits 1.
+
+The owned file:
 
 ```ini
+# Written by groundwork-core git-credential/setup-github-https.sh; rerun it to change.
 [credential "https://github.com"]
 	useHttpPath = true
 	helper =
@@ -78,25 +94,25 @@ file gets:
 ```
 
 It also sets gh's `git_protocol` to `https`. A second run with the same
-arguments changes nothing and says so. An existing helper chain for
-`https://github.com` in the target file (for example the one
-`gh auth setup-git` writes) is replaced. It never reads or edits ssh config;
+arguments changes nothing and says so. It never reads or edits ssh config;
 SSH keys and host aliases keep working for anyone who calls them directly.
 
 Afterwards setup checks what git and the helper really see, across every file
 and include, and exits 1 instead of printing "already configured" when:
 
-- the `--file` is not included from the global config;
 - a mapped owner has another value elsewhere: the helper reads
   `git config --global --includes`, where the last value wins, so a later
-  `[ghaccount]` in `~/.gitconfig` would override the `--file` one;
-- a helper it does not own still runs for github.com, for example a later
-  `[credential] helper = osxkeychain`, which would be sent every token git
-  approves, or a later github.com section, such as a leftover from
-  `gh auth setup-git`, that resets the chain.
+  `[ghaccount]` in `~/.gitconfig` overrides the owned file;
+- a helper Groundwork does not own still runs for github.com, for example a
+  later `[credential] helper = osxkeychain`, which would be sent every token
+  git approves, or a later github.com section, such as a leftover from
+  `gh auth setup-git`, that resets the chain. Because the include line is
+  appended, this happens when the global file already had an `[include]`
+  section above such a block; git adds the path to that section.
 
 Each problem names the file and key and the `git config --file ... --unset-all`
-command that removes it. When that file is generated (a chezmoi template),
+command that removes it. Setup prints these and leaves the fix to the person,
+since the file is theirs. When that file is generated (a chezmoi template),
 drop the block from the template instead, or the next apply puts it back.
 
 The helper order matters. The empty `helper =` resets the list, so a helper
@@ -116,20 +132,16 @@ When that matters, pin an absolute path with `GROUNDWORK_GH` or
 ### chezmoi and other managed gitconfigs
 
 When `~/.gitconfig` is generated (groundwork-mac renders it from
-`home/dot_gitconfig.tmpl`), writing into it gets reverted on the next apply.
-Use a separate file instead, include it from the template, and drop the
-template's own github.com helper chain:
+`home/dot_gitconfig.tmpl`) or is a symlink, setup leaves it alone. Add the
+include to the source, and drop the template's own github.com helper chain,
+which would otherwise reset this one:
 
 ```ini
-# in the managed ~/.gitconfig
 [include]
-	path = ~/.config/groundwork/github.gitconfig
+	path = ~/.config/groundwork/github-https.gitconfig
 ```
 
-```sh
-core/git-credential/setup-github-https.sh --file ~/.config/groundwork/github.gitconfig --map ...
-core/git-credential/check-github-https.sh --file ~/.config/groundwork/github.gitconfig --root ~/code
-```
+Then rerun setup; it finds the include and has nothing more to do.
 
 ## Map keys
 
@@ -170,17 +182,17 @@ core/git-credential/check-github-https.sh [--file PATH] [--ssh-alias HOST]... \
 It checks:
 
 - `useHttpPath` for github.com;
-- the chain in the target file (empty reset, helper, gh), that the helper it
+- the chain in the owned file (default path, or `--file`): empty reset, helper, gh; that the helper it
   names exists and is executable, and that its gh path exists and is not a
   versioned mise path;
-- that a `--file` is included from the global config;
+- that the owned file is included from the global config;
 - the chain git really runs for github.com, outside any repository and again
   inside each repository checked, so `includeIf` files and local config count.
   A subsection matches whatever the case of its scheme and host, with or
-  without `:443`, and one with a wildcard is assumed to match. Any helper after
+  without userinfo or `:443`, and one with a wildcard is assumed to match. Any helper after
   gh's, ahead of the owner helper, or a later reset is a failure;
 - the owner map as the helper sees it (`git config --global --includes`): an
-  owner with more than one value, or a value that differs from the target
+  owner with more than one value, or a value that differs from the owned
   file's, is a failure;
 - gh's `git_protocol`, and that every mapped account appears in
   `gh auth status` (only account names are read from it; its text is never
@@ -191,7 +203,9 @@ It checks:
   sends pushes back to SSH, and, when more than one gh account is logged in,
   owners with no mapping.
 
-Each failure is followed by the command that fixes it.
+Each failure is followed by the command that fixes it. Fixes for the owned
+file are the setup command that regenerates it with its current map and
+aliases; fixes for other files name the file and key to remove.
 
 ## Calling it from a platform repo
 
@@ -199,7 +213,5 @@ The platform installer runs `setup-github-https.sh` with its owner map and SSH
 aliases after gh is installed and logged in, and runs `check-github-https.sh`
 with the same `--file` and `--ssh-alias` from its own doctor. Account names stay
 in the platform repo or the machine, not here. Removing the setup means
-unsetting the keys above (`git config --global --unset-all
-credential.https://github.com.helper`, the `url.https://github.com/.insteadOf`
-values, and the `ghaccount` section), or deleting the `--file` and its include,
-and removing the installed helper.
+deleting the owned file and its `include.path` line
+(`git config --global --unset include.path <file>`), and the installed helper.

@@ -18,21 +18,22 @@ here=$(cd "$(dirname "$0")" && pwd -P)
 # shellcheck source-path=SCRIPTDIR source=github-https-lib.sh
 . "$here/github-https-lib.sh"
 default_helper=${XDG_DATA_HOME:-$HOME/.local/share}/groundwork/git-credential/owner-credential-helper.sh
-file=
+usage() { echo "usage: ${0##*/} [--file PATH] [--ssh-alias HOST]... [--root DIR]... [REPO]..." >&2; exit 64; }
+file=$(default_file)
 repos=()
 roots=()
 aliases=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --file) [ $# -ge 2 ] || exit 64; file=$2; shift 2 ;;
-    --ssh-alias) [ $# -ge 2 ] || exit 64; aliases+=("$2"); shift 2 ;;
-    --root) [ $# -ge 2 ] || exit 64; roots+=("$2"); shift 2 ;;
-    -*) echo "usage: ${0##*/} [--file PATH] [--ssh-alias HOST]... [--root DIR]... [REPO]..." >&2; exit 64 ;;
+    --file) [ $# -ge 2 ] || usage; file=$2; shift 2 ;;
+    --ssh-alias) [ $# -ge 2 ] || usage; aliases+=("$2"); shift 2 ;;
+    --root) [ $# -ge 2 ] || usage; roots+=("$2"); shift 2 ;;
+    -*) usage ;;
     *) repos+=("$1"); shift ;;
   esac
 done
-case "$file" in ''|/*) ;; *) echo "check-github-https: --file needs an absolute path" >&2; exit 64 ;; esac
-target=${file:-$(global_file)}
+case "$file" in /*) ;; *) echo "check-github-https: --file needs an absolute path" >&2; exit 64 ;; esac
+target=$file
 
 rc=0
 ok() { printf 'ok: %s\n' "$*"; }
@@ -44,10 +45,12 @@ seen_problems=
 # each. Feed it with a here-document, not a pipe, so rc is kept.
 problems() {
   local what how
-  while IFS=$'\t' read -r what how; do
+  while IFS="$tab" read -r what how; do
     [ -n "$what" ] || continue
-    case "$seen_problems" in *"|$what|"*) continue ;; esac
-    seen_problems="$seen_problems|$what|"
+    # A problem already reported outside any repo is not repeated per repo;
+    # one found in several repos is reported for each.
+    case "$seen_problems" in *"|$what|"*|*"|$1$what|"*) continue ;; esac
+    seen_problems="$seen_problems|$1$what|"
     fail "$1$what"
     fix "$how"
   done
@@ -66,21 +69,28 @@ ghh=${raw[2]:-}
 ghh_path=${ghh#!} ghh_path=${ghh_path% auth git-credential}
 [ "!$ghh_path auth git-credential" = "$ghh" ] && [ -n "$ghh_path" ] || ghh_path=
 
+# The setup command that regenerates the target file as it is now.
 setup_cmd=$(q "$here/setup-github-https.sh")
-[ -z "$file" ] || setup_cmd="$setup_cmd --file $(q "$file")"
+[ "$file" = "$(default_file)" ] || setup_cmd="$setup_cmd --file $(q "$file")"
 if [ -n "$helper" ] && [ "$helper" != "$default_helper" ] && [ -x "$helper" ]; then
   setup_cmd="$setup_cmd --helper $(q "$helper")"
 fi
-for k in $mapped; do
-  setup_cmd="$setup_cmd --map ${k#ghaccount.}=$(nrepo config --global --includes --get "$k")"
+while read -r k v; do
+  [ -n "$k" ] && setup_cmd="$setup_cmd --map ${k#ghaccount.}=$v"
+done <<EOF
+$(git config --file "$target" --get-regexp '^ghaccount\.' 2>/dev/null)
+EOF
+have_aliases=$(git config --file "$target" --get-all url.https://github.com/.insteadOf 2>/dev/null \
+  | sed -n 's/^git@\(.*\):$/\1/p' | grep -vx github.com || true)
+for a in $have_aliases ${aliases[@]+"${aliases[@]}"}; do
+  case " $setup_cmd " in *" --ssh-alias $a "*) ;; *) setup_cmd="$setup_cmd --ssh-alias $a" ;; esac
 done
-for a in ${aliases[@]+"${aliases[@]}"}; do setup_cmd="$setup_cmd --ssh-alias $a"; done
 
 if [ "$(nrepo config --type=bool --get-urlmatch credential.useHttpPath https://github.com/o/r 2>/dev/null)" = true ]; then
   ok "$key.useHttpPath is true"
 else
   fail "$key.useHttpPath is not true, so helpers never see the repository owner"
-  fix "git config --file $(q "$target") $key.useHttpPath true"
+  fix "$setup_cmd"
 fi
 
 chain_ok=0
@@ -103,9 +113,9 @@ else
   fail "$key.helper chain in $target is missing or out of order (want: empty reset, owner helper, !<gh> auth git-credential)"
   fix "$setup_cmd"
 fi
-if [ -n "$file" ] && ! included "$file"; then
+if ! included "$file"; then
   fail "$file is not included from the global git config, so git does not read it"
-  fix "git config --global --add include.path $(q "$file")"
+  fix "$setup_cmd"
 elif [ "$chain_ok" = 1 ]; then
   problems "" <<EOF
 $(chain_problems "" "$helper" "$ghh" "$setup_cmd"
@@ -167,7 +177,7 @@ ssh_host() {
 # The pushInsteadOf entry that sends PUSHURL (configured as RAW) back to SSH.
 push_culprit() {
   local o k v base line
-  while IFS=$'\t' read -r o line; do
+  while IFS="$tab" read -r o line; do
     [ -n "$line" ] || continue
     o=${o#file:}
     case "$o" in /*) ;; *) o=$1/$o ;; esac
@@ -202,9 +212,10 @@ EOF
     if [[ "$lurl" =~ ^https://([^/@]+@)?github\.com(:443)?/(.*)$ ]]; then
       path=${BASH_REMATCH[3]}
     elif [[ "$lurl" =~ ^([^@/:]+@)?([a-z0-9._-]+):([^/].*)$ ]] && ssh_host "${BASH_REMATCH[2]}"; then
-      prefix="${url%%:*}:" path=${BASH_REMATCH[3]}
+      prefix="${url%%:*}:" path=${BASH_REMATCH[3]} host=${BASH_REMATCH[2]}
     elif [[ "$lurl" =~ ^ssh://([^@/]+@)?([a-z0-9._-]+)(:[0-9]+)?/(.*)$ ]] && ssh_host "${BASH_REMATCH[2]}"; then
       prefix=${url:0:$((${#url} - ${#BASH_REMATCH[4]}))} path=${BASH_REMATCH[4]}
+      host=${BASH_REMATCH[2]}${BASH_REMATCH[3]}
     fi
     [ -n "$path" ] || continue
     if [ -n "$prefix" ]; then
@@ -212,11 +223,14 @@ EOF
       culprit=
       [ "$kind" = "(push)" ] && culprit=$(push_culprit "$r" "$rawurl" "$url")
       if [ -n "$culprit" ]; then
-        fail "$r: remote $name pushes over SSH because ${culprit#*$'\t'} in ${culprit%%$'\t'*} rewrites pushes back to SSH"
-        fix "git config --file $(q "${culprit%%$'\t'*}") --unset-all ${culprit#*$'\t'}"
+        fail "$r: remote $name pushes over SSH because ${culprit#*"$tab"} in ${culprit%%"$tab"*} rewrites pushes back to SSH"
+        fix "git config --file $(q "${culprit%%"$tab"*}") --unset-all ${culprit#*"$tab"}"
       else
         fail "$r: remote $name uses SSH ($prefix${path%%/*}/...) and no insteadOf rewrites it"
-        fix "git config --file $(q "$target") --add url.https://github.com/.insteadOf $(q "$prefix")"
+        case "$host" in
+          github.com|ssh.github.com|*:*) fix "git -C $(q "$r") remote set-url $(q "$name") $(q "https://github.com/$path")" ;;
+          *) fix "$setup_cmd --ssh-alias $host" ;;
+        esac
       fi
     fi
     owners=$(printf '%s\n%s\t%s' "$owners" "${path%%/*}" "$r")
@@ -226,7 +240,7 @@ EOF
 done
 
 seen=
-while IFS=$'\t' read -r owner r; do
+while IFS="$tab" read -r owner r; do
   [ -n "$owner" ] || continue
   case " $seen " in *" $owner "*) continue ;; esac
   seen="$seen $owner"
@@ -239,7 +253,7 @@ while IFS=$'\t' read -r owner r; do
   elif [ "$n_accounts" -gt 1 ]; then
     fail "owner $owner ($r) has no gh account mapping and $n_accounts accounts are logged in, so gh uses whichever is active"
     # shellcheck disable=SC2086 # account names hold no spaces or globs
-    fix "git config --file $(q "$target") ghaccount.$owner <account>   # one of: $(printf '%s ' $accounts)"
+    fix "$setup_cmd --map $owner=<account>   # one of: $(printf '%s ' $accounts)"
   else
     note "owner $owner ($r) has no mapping; gh's active account serves it"
   fi

@@ -3,8 +3,11 @@
 temp HOME, temp system and global git config, and a fake gh on PATH."""
 
 import os
+import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -48,13 +51,16 @@ class GitCredentialTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.t = t = Path(self.tmp.name)
         (t / "bin").mkdir()
-        for name, body in (("gh", FAKE_GH), ("git-credential-osxkeychain", FAKE_KEYCHAIN)):
+        # chezmoi exits 1: nothing here is managed by it.
+        for name, body in (("gh", FAKE_GH), ("git-credential-osxkeychain", FAKE_KEYCHAIN),
+                           ("chezmoi", "#!/bin/sh\nexit 1\n")):
             (t / "bin" / name).write_text(body)
             (t / "bin" / name).chmod(0o755)
         (t / "sysconfig").write_text("[credential]\n\thelper = osxkeychain\n")
         self.gitconfig = t / "gitconfig"
         self.installed = t / "data" / "groundwork" / "git-credential" / "owner-credential-helper.sh"
         self.gh = t / "bin" / "gh"
+        self.owned = t / "config" / "groundwork" / "github-https.gitconfig"
         self.env = {
             "PATH": f"{t / 'bin'}:{os.environ['PATH']}", "HOME": str(t),
             "XDG_CONFIG_HOME": str(t / "config"), "XDG_DATA_HOME": str(t / "data"),
@@ -76,8 +82,8 @@ class GitCredentialTest(unittest.TestCase):
         self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
         return r
 
-    def fill(self, path, rc=0, host="github.com"):
-        r = self.git("credential", "fill",
+    def fill(self, path, rc=0, host="github.com", cwd=None):
+        r = self.git("credential", "fill", cwd=cwd,
                      input=f"protocol=https\nhost={host}\npath={path}\n\n")
         self.assertEqual(r.returncode, rc, r.stderr)
         return dict(line.split("=", 1) for line in r.stdout.splitlines()) if rc == 0 else r
@@ -125,42 +131,85 @@ class GitCredentialTest(unittest.TestCase):
 
     def test_helper_falls_through_only_when_unmapped(self):
         self.setup()
-        # A repository's own config cannot map an owner.
+        # Neither a repository's own config nor an includeIf for its directory
+        # can map an owner: the helper reads from outside any repository.
         local = self.repo("l", "https://github.com/someone/l.git")
         self.git("-C", local, "config", "ghaccount.someone", "work-account")
+        (self.t / "map.gitconfig").write_text("[ghaccount]\n\tsomeone = work-account\n")
+        self.git("config", "--global", f"includeIf.gitdir:{self.t}/code/.path", str(self.t / "map.gitconfig"))
+        self.assertEqual(self.fill("someone/l.git", cwd=local)["password"], "tok-personal")
         for stdin in ("protocol=https\nhost=github.com\npath=someone/r.git\n\n",
                       "protocol=https\nhost=example.com\npath=example-org/r.git\n\n",
                       "protocol=https\nhost=github.com\npath=1digit/r.git\n\n",
+                      "protocol=https\nhost=github.com\npath=\n\n",
                       "protocol=https\nhost=github.com\n\n"):
             r = self.run_(self.installed, "get", input=stdin, cwd=local)
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), stdin)
+        r = self.run_(self.installed, "get", input="protocol=HTTPS\nhost=github.com\npath=example-org/r\n\n")
+        self.assertIn("password=tok-work-account", r.stdout)
         r = self.run_(self.installed, "store", input="protocol=https\nhost=github.com\npassword=x\n\n")
         self.assertEqual((r.returncode, r.stdout), (0, ""))
+        # A config git cannot read fails closed instead of looking unmapped.
+        with self.gitconfig.open("a") as f:
+            f.write("[broken\n")
+        r = self.run_(self.installed, "get", input="protocol=https\nhost=github.com\npath=example-org/r\n\n")
+        self.assertEqual((r.returncode, r.stdout), (0, "quit=1\n"))
 
-    def test_setup_installs_replaces_chain_and_is_idempotent(self):
-        # What `gh auth setup-git` leaves behind.
-        self.gitconfig.write_text('[credential "https://github.com"]\n\thelper =\n'
-                                  '\thelper = !/opt/gh/2.0/bin/gh auth git-credential\n')
+    def test_setup_owns_its_file_and_is_idempotent(self):
+        # The user's global file: a comment, identity, an include, and what
+        # `gh auth setup-git` leaves behind. Setup only adds one include line.
+        seed = ("# mine\n[user]\n\tname = Test User\n"
+                '[credential "https://github.com"]\n\thelper =\n'
+                "\thelper = !/opt/gh/2.0/bin/gh auth git-credential\n"
+                f"[include]\n\tpath = {self.t / 'other.gitconfig'}\n")
+        self.gitconfig.write_text(seed)
         self.setup("--ssh-alias", "github-personal")
+        lines = self.gitconfig.read_text().splitlines(keepends=True)
+        lines.remove(f"\tpath = {self.owned}\n")
+        self.assertEqual("".join(lines), seed)
         self.assertEqual(self.installed.read_bytes(), HELPER.read_bytes())
         self.assertEqual(self.installed.stat().st_mode & 0o777, 0o755)
-        first = self.gitconfig.read_bytes()
-        mtime = self.installed.stat().st_mtime_ns
+        state = [self.gitconfig.read_bytes(), self.owned.read_bytes(), self.installed.stat().st_mtime_ns]
         r = self.setup("--ssh-alias", "github-personal")
         self.assertIn("nothing changed", r.stdout)
-        self.assertEqual(self.gitconfig.read_bytes(), first)
-        self.assertEqual(self.installed.stat().st_mtime_ns, mtime)
-        chain = self.git("config", "--get-all", KEY).stdout.splitlines()
-        self.assertEqual(chain, ["", str(self.installed), f"!{self.gh} auth git-credential"])
-        rewrites = self.git("config", "--get-all", "url.https://github.com/.insteadOf").stdout.split()
-        self.assertEqual(sorted(rewrites), sorted(["git@github.com:", "ssh://git@github.com/",
-                                                   "git@github-personal:", "ssh://git@github-personal/"]))
+        self.assertEqual([self.gitconfig.read_bytes(), self.owned.read_bytes(),
+                          self.installed.stat().st_mtime_ns], state)
+        own = lambda *a: self.git("config", "--file", self.owned, *a).stdout
+        self.assertEqual(own("--get-all", KEY).splitlines(),
+                         ["", str(self.installed), f"!{self.gh} auth git-credential"])
+        self.assertEqual(sorted(own("--get-all", "url.https://github.com/.insteadOf").split()),
+                         sorted(["git@github.com:", "ssh://git@github.com/",
+                                 "git@github-personal:", "ssh://git@github-personal/"]))
         self.assertEqual(self.git("config", "ghaccount.example-org").stdout.strip(), "work-account")
         self.assertEqual((self.t / "proto").read_text().strip(), "https")
         repo = self.repo("a", "git@github-personal:example-org/a.git")
         r = self.check("--ssh-alias", "github-personal", repo)
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertNotIn("FAIL", r.stdout)
+        # A signal while the new file is being written leaves the old one whole.
+        (self.t / "slow").mkdir()
+        (self.t / "slow" / "cmp").write_text(
+            f'#!/bin/sh\ncase "$2" in *.lock) touch "{self.t}/mark"; sleep 2 ;; esac\n'
+            f'exec {shutil.which("cmp")} "$@"\n')
+        (self.t / "slow" / "cmp").chmod(0o755)
+        env = dict(self.env, PATH=f"{self.t / 'slow'}:{self.env['PATH']}")
+        p = subprocess.Popen([str(SETUP), "--map", "example-org=personal"], env=env, cwd=self.t,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            if (self.t / "mark").exists():
+                break
+            time.sleep(0.1)
+        p.send_signal(signal.SIGTERM)
+        self.assertEqual(p.wait(timeout=30), 143)
+        p.stdout.close(), p.stderr.close()
+        self.assertEqual(self.owned.read_bytes(), state[1])
+        self.assertFalse(Path(f"{self.owned}.lock").exists())
+        # A held lock stops setup and is left for its owner.
+        Path(f"{self.owned}.lock").write_text("")
+        r = self.setup(rc=1)
+        self.assertIn("lock exists", r.stderr)
+        self.assertEqual(self.owned.read_bytes(), state[1])
+        Path(f"{self.owned}.lock").unlink()
         # A helper after gh's would receive every approved token. One added
         # by includeIf only applies inside matching repos: the doctor checks
         # from inside each repo.
@@ -170,37 +219,45 @@ class GitCredentialTest(unittest.TestCase):
             f.write(f'[includeIf "gitdir:{self.t}/code/"]\n\tpath = {extra}\n')
         r = self.check(repo)
         self.assert_fail_with_fix(r.stdout, f"{repo}: credential.helper in {extra} runs after gh's helper")
-        # A mixed-case subsection still applies to github.com: setup refuses
-        # to say "configured".
+        # Mixed case and userinfo still apply to github.com: setup refuses to
+        # say "configured".
         with self.gitconfig.open("a") as f:
-            f.write('[credential "https://GitHub.com"]\n\thelper = osxkeychain\n')
+            f.write('[credential "https://GitHub.com"]\n\thelper = osxkeychain\n'
+                    '[credential "https://alice@github.com"]\n\thelper = spy\n')
         r = self.setup(rc=1)
         self.assertIn("credential.https://GitHub.com.helper in", r.stderr)
+        self.assertIn("credential.https://alice@github.com.helper in", r.stderr)
         self.assertNotIn("nothing changed", r.stdout)
-        self.assert_fail_with_fix(self.check().stdout, "runs after gh's helper")
+        self.assert_fail_with_fix(self.check().stdout, "alice@github.com.helper in")
 
-    def test_file_target_for_an_included_config(self):
-        target = self.t / "config" / "groundwork" / "github.gitconfig"
-        r = self.setup("--file", target, rc=1)
-        self.assertIn("is not included", r.stderr)
-        self.assertFalse(self.gitconfig.exists())
-        self.assert_fail_with_fix(self.check("--file", target).stdout, "is not included")
-        self.git("config", "--global", "include.path", "~/config/groundwork/github.gitconfig")
-        self.assertIn("nothing changed", self.setup("--file", target).stdout)
+    def test_managed_global_config_and_conflicts(self):
+        # A symlinked (stowed or managed) global file is never written.
+        dot = self.t / "dotfiles" / "gitconfig"
+        dot.parent.mkdir()
+        dot.write_text("[user]\n\tname = Test User\n")
+        self.gitconfig.symlink_to(dot)
+        r = self.setup(rc=1)
+        self.assertIn(f"[include]\n\tpath = {self.owned}", r.stderr)
+        self.assertEqual(dot.read_text(), "[user]\n\tname = Test User\n")
+        self.assert_fail_with_fix(self.check().stdout, "is not included")
+        # The template adds the include (here with ~); then setup has nothing to do.
+        with dot.open("a") as f:
+            f.write("[include]\n\tpath = ~/config/groundwork/github-https.gitconfig\n")
+        self.assertIn("nothing changed", self.setup().stdout)
         self.assertEqual(self.fill("example-org/r.git")["password"], "tok-work-account")
-        r = self.check("--file", target)
+        r = self.check()
         self.assertEqual(r.returncode, 0, r.stdout)
-        base = self.gitconfig.read_text()
+        base = dot.read_text()
         # A later map value in the global file wins for the helper.
-        self.gitconfig.write_text(base + "[ghaccount]\n\texample-org = personal\n")
+        dot.write_text(base + "[ghaccount]\n\texample-org = personal\n")
         self.assertEqual(self.fill("example-org/r.git")["password"], "tok-personal")
-        r = self.setup("--file", target, rc=1)
+        r = self.setup(rc=1)
         self.assertIn(f"--file {self.gitconfig} --unset-all ghaccount.example-org", r.stderr)
-        self.assert_fail_with_fix(self.check("--file", target).stdout, "ghaccount.example-org has more")
+        self.assert_fail_with_fix(self.check().stdout, "ghaccount.example-org has more")
         # A leftover chain later in the global file resets the included one.
-        self.gitconfig.write_text(base + '[credential "https://github.com"]\n\thelper =\n'
-                                  f'\thelper = !{self.gh} auth git-credential\n')
-        for out in (self.setup("--file", target, rc=1).stderr, self.check("--file", target).stdout):
+        dot.write_text(base + '[credential "https://github.com"]\n\thelper =\n'
+                       f'\thelper = !{self.gh} auth git-credential\n')
+        for out in (self.setup(rc=1).stderr, self.check().stdout):
             self.assertIn(f"credential.https://github.com.helper in {self.gitconfig} resets", out)
             self.assertNotIn("not included", out)
 
@@ -209,8 +266,8 @@ class GitCredentialTest(unittest.TestCase):
                      ["--helper", "rel/helper.sh"], ["--ssh-alias", "a b"], ["--file", "rel/x"]):
             r = self.run_(SETUP, *args)
             self.assertEqual(r.returncode, 64, args)
-            self.assertFalse(self.gitconfig.exists(), args)
-            self.assertFalse(self.installed.exists(), args)
+            for f in (self.gitconfig, self.owned, self.installed):
+                self.assertFalse(f.exists(), (args, f))
 
     def test_doctor_failures_each_have_a_fix(self):
         repo = self.repo("w", "git@github-work:example-org/w.git")
@@ -224,11 +281,11 @@ class GitCredentialTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertEqual(self.gitconfig.read_bytes(), before)  # read-only
         self.assertFalse((self.t / "proto").exists())
-        for needle in ("useHttpPath", "is missing or out of order", "git_protocol",
+        for needle in ("useHttpPath", "is missing or out of order", "is not included", "git_protocol",
                        "maps to gone-account", "owner unmapped-owner", "remote origin uses SSH",
                        "ssh alias github-work", f"pushes over SSH because url.git@github.com:.pushinsteadof in {push}/.git/config"):
             self.assert_fail_with_fix(r.stdout, needle)
-        self.assertIn("insteadOf git@github-work:", r.stdout)
+        self.assertIn("--ssh-alias github-work", r.stdout)
         self.assertIn("note: owner 1digit", r.stdout)
         self.assertNotIn("FAIL: owner 1digit", r.stdout)
         self.assertNotIn("tok-", r.stdout + r.stderr)
@@ -238,9 +295,9 @@ class GitCredentialTest(unittest.TestCase):
         self.setup()
         self.installed.unlink()
         self.assert_fail_with_fix(self.check().stdout, "owner helper is missing")
-        self.git("config", "--global", "--unset-all", KEY)
+        self.git("config", "--file", self.owned, "--unset-all", KEY)
         for v in (str(self.installed), "", f"!{self.gh} auth git-credential"):
-            self.git("config", "--global", "--add", KEY, v)
+            self.git("config", "--file", self.owned, "--add", KEY, v)
         self.env["FAKE_GH_ACCOUNTS"] = "work-account"
         r = self.check(repo, self.t / "code" / "u")
         self.assert_fail_with_fix(r.stdout, "missing or out of order")
