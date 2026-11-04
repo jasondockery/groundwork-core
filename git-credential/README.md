@@ -27,7 +27,7 @@ lives.
 
 | Request | Result |
 |---|---|
-| github.com, owner mapped, gh has a token for the account | `username=<account>`, `password=<token>` |
+| github.com (any case, with or without `:443`), owner mapped, gh has a token for the account | `username=<account>`, `password=<token>` |
 | github.com, owner mapped, no token (logged out, gh missing) | `quit=1`: git stops with "credential helper ... told us to quit". One stderr line names the owner and account and the fix, `gh auth login -h github.com` |
 | github.com, owner not mapped, or not mappable | nothing; gh's helper answers with the active account |
 | another host, or no `path=` | nothing |
@@ -52,9 +52,14 @@ It first copies the helper to a stable path,
 `${XDG_DATA_HOME:-~/.local/share}/groundwork/git-credential/owner-credential-helper.sh`
 (written to a temp file and moved into place, mode 0755, skipped when the
 bytes already match), so the config does not point into a checkout that can
-move. `--helper PATH` uses an existing helper instead. Then, in the global git
-config (`git config --global`, so `GIT_CONFIG_GLOBAL` is honored) or the file
-named by `--file`:
+move. `--helper PATH` uses an existing helper instead. Then it edits one file:
+the one `git config --global` writes (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig`,
+else `$XDG_CONFIG_HOME/git/config` when only that exists), or the absolute path
+given with `--file` (a relative `--file` is rejected with exit 64). Every edit
+goes to a temp copy in the same directory with the same mode, which then
+replaces the file in one rename, so an interrupted run leaves the old file
+whole. A symlinked target is refused; pass the real file with `--file`. The
+file gets:
 
 ```ini
 [credential "https://github.com"]
@@ -75,17 +80,24 @@ named by `--file`:
 It also sets gh's `git_protocol` to `https`. A second run with the same
 arguments changes nothing and says so. An existing helper chain for
 `https://github.com` in the target file (for example the one
-`gh auth setup-git` writes) is replaced, and setup reports how many entries it
-replaced. It never reads or edits ssh config; SSH keys and host aliases keep
-working for anyone who calls them directly. If setup is interrupted, run it
-again.
+`gh auth setup-git` writes) is replaced. It never reads or edits ssh config;
+SSH keys and host aliases keep working for anyone who calls them directly.
 
-Afterwards setup rebuilds the chain git really runs for github.com from the
-system and global scopes, following includes. If a helper it does not own
-would still run, for example a `[credential] helper = osxkeychain` later in the
-file, which would be sent every token git approves, it names that entry and
-exits 1 instead of printing "already configured". With `--file`, it also exits
-1 until that file is included from the global config.
+Afterwards setup checks what git and the helper really see, across every file
+and include, and exits 1 instead of printing "already configured" when:
+
+- the `--file` is not included from the global config;
+- a mapped owner has another value elsewhere: the helper reads
+  `git config --global --includes`, where the last value wins, so a later
+  `[ghaccount]` in `~/.gitconfig` would override the `--file` one;
+- a helper it does not own still runs for github.com, for example a later
+  `[credential] helper = osxkeychain`, which would be sent every token git
+  approves, or a later github.com section, such as a leftover from
+  `gh auth setup-git`, that resets the chain.
+
+Each problem names the file and key and the `git config --file ... --unset-all`
+command that removes it. When that file is generated (a chezmoi template),
+drop the block from the template instead, or the next apply puts it back.
 
 The helper order matters. The empty `helper =` resets the list, so a helper
 from a wider scope cannot answer first. On macOS that is the `osxkeychain`
@@ -161,15 +173,21 @@ It checks:
 - the chain in the target file (empty reset, helper, gh), that the helper it
   names exists and is executable, and that its gh path exists and is not a
   versioned mise path;
-- the chain git really runs, across the system and global scopes and their
-  includes: any helper after gh's, or ahead of the owner helper, is a failure,
-  and so is a `--file` that the global config does not include;
+- that a `--file` is included from the global config;
+- the chain git really runs for github.com, outside any repository and again
+  inside each repository checked, so `includeIf` files and local config count.
+  A subsection matches whatever the case of its scheme and host, with or
+  without `:443`, and one with a wildcard is assumed to match. Any helper after
+  gh's, ahead of the owner helper, or a later reset is a failure;
+- the owner map as the helper sees it (`git config --global --includes`): an
+  owner with more than one value, or a value that differs from the target
+  file's, is a failure;
 - gh's `git_protocol`, and that every mapped account appears in
   `gh auth status` (only account names are read from it; its text is never
   printed);
 - that each `--ssh-alias` is rewritten to `https://github.com/`;
 - for the repositories passed in, and those up to three levels under each
-  `--root`: SSH GitHub remotes no `insteadOf` rewrites, a `pushInsteadOf` that
+  `--root`: SSH GitHub remotes (host compared without case) no `insteadOf` rewrites, a `pushInsteadOf` that
   sends pushes back to SSH, and, when more than one gh account is logged in,
   owners with no mapping.
 

@@ -30,8 +30,8 @@ gh_path() {
 }
 
 refuse() {
-  printf 'owner-credential-helper: owner %s maps to gh account %s, but %s\n' "$1" "$2" "$3" >&2
-  printf 'owner-credential-helper: fix: gh auth login -h github.com   # sign in as %s\n' "$2" >&2
+  printf 'owner-credential-helper: owner %s maps to gh account %s, but %s; fix: gh auth login -h github.com (sign in as %s)\n' \
+    "$1" "$2" "$3" "$2" >&2
   printf 'quit=1\n'
 }
 
@@ -45,6 +45,9 @@ get() {
       path=*) path=${line#path=} ;;
     esac
   done
+  # Git applies the github.com chain to GitHub.com and github.com:443 too.
+  host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
+  host=${host%:443}
   [ "$protocol" = https ] && [ "$host" = github.com ] || return 0
   owner=${path%%/*}
   # A git config variable name: a letter, then letters, digits and hyphens.
