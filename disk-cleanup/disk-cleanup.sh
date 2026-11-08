@@ -97,6 +97,7 @@ dc_load_policy() {
   dc_override DC_OBSERVE_DEADLINE_SECONDS GROUNDWORK_DISK_OBSERVE_DEADLINE_SECONDS 1 600
   dc_override DC_REPORT_DEADLINE_SECONDS GROUNDWORK_DISK_REPORT_DEADLINE_SECONDS 1 1800
   dc_override DC_PROMPT_DEADLINE_SECONDS GROUNDWORK_DISK_PROMPT_DEADLINE_SECONDS 1 3600
+  dc_override DC_HEARTBEAT_SECONDS GROUNDWORK_DISK_HEARTBEAT_SECONDS 1 3600
 }
 
 # ---- Never-touch list ----------------------------------------------------------
@@ -140,9 +141,11 @@ dc_canonicalize() {
   case "$remainder/" in
     */../* | */./*) return 1 ;;
   esac
-  if [[ -d "$path" ]]; then
+  if [[ -d "$path" && -L "$path" ]]; then
     path="$(cd -P -- "$path" 2>/dev/null && pwd -P)" || return 1
-  else
+  elif [[ "$path" != "/" ]]; then
+    # Resolve the parent without entering the path itself, because macOS can ask for
+    # permission when a process enters another app's folder.
     parent="${path%/*}"
     [[ -n "$parent" ]] || parent="/"
     name="${path##*/}"
@@ -156,9 +159,14 @@ dc_canonicalize() {
   fi
 }
 
+# An unreadable or empty list protects nothing, so it must stop everything.
+dc_never_touch_readable() {
+  awk -F '\t' '!/^#/ && $1 != "" { found = 1 } END { exit !found }' "$dc_root/never-touch.tsv" 2>/dev/null
+}
+
 # Returns 0 and sets DC_PROTECT_REASON when the path must not be touched.
 dc_path_protected() {
-  local entry why canonical home_canonical dir
+  local entry why canonical home_canonical dir entry_path
   DC_PROTECT_REASON=""
   if ! dc_canonicalize "$1"; then
     DC_PROTECT_REASON="it could not be resolved safely"
@@ -174,36 +182,69 @@ dc_path_protected() {
     DC_PROTECT_REASON="it is the whole disk or home folder"
     return 0
   fi
+  if ! dc_never_touch_readable; then
+    DC_PROTECT_REASON="the never-touch list could not be read"
+    return 0
+  fi
   while IFS=$'\t' read -r entry why; do
     case "$entry" in "" | \#*) continue ;; esac
-    dc_canonicalize "$entry" || continue
+    if ! dc_canonicalize "$entry"; then
+      DC_PROTECT_REASON="$entry is on the never-touch list and could not be resolved safely"
+      return 0
+    fi
+    entry_path="$dc_canonical"
     case "$canonical/" in
-      "$dc_canonical/"*)
+      "$entry_path/"*)
         DC_PROTECT_REASON="$entry is on the never-touch list ($why)"
         return 0
         ;;
     esac
-    case "$dc_canonical/" in
+    case "$entry_path/" in
       "$canonical/"*)
         DC_PROTECT_REASON="it contains $entry, which is on the never-touch list ($why)"
         return 0
         ;;
     esac
+    # A Mac's default volume ignores case, so ~/.SSH is ~/.ssh under another spelling.
+    # Comparing the files themselves catches that wherever the volume does it.
+    if [[ -e "$entry_path" ]]; then
+      dir="$canonical"
+      while [[ -n "$dir" && "$dir" != "/" && "$dir" != "$home_canonical" ]]; do
+        if [[ "$dir" -ef "$entry_path" ]]; then
+          DC_PROTECT_REASON="$entry is on the never-touch list ($why)"
+          return 0
+        fi
+        dir="${dir%/*}"
+      done
+      dir="$entry_path"
+      while [[ -n "$dir" && "$dir" != "/" && "$dir" != "$home_canonical" ]]; do
+        if [[ "$dir" -ef "$canonical" ]]; then
+          DC_PROTECT_REASON="it contains $entry, which is on the never-touch list ($why)"
+          return 0
+        fi
+        dir="${dir%/*}"
+      done
+    fi
   done <"$dc_root/never-touch.tsv"
+  shopt -s nocasematch
   case "$canonical/" in
     */.git/*)
+      shopt -u nocasematch
       DC_PROTECT_REASON="it is inside a .git directory"
       return 0
       ;;
     */pnpm/store/* | */.pnpm-store/*)
+      shopt -u nocasematch
       DC_PROTECT_REASON="it is in a pnpm store, which only pnpm store prune may change"
       return 0
       ;;
     */docker/volumes/*)
+      shopt -u nocasematch
       DC_PROTECT_REASON="it is Docker volume data"
       return 0
       ;;
   esac
+  shopt -u nocasematch
   if [[ -n "${dc_pnpm_store:-}" ]]; then
     case "$canonical/" in
       "$dc_pnpm_store/"*)
@@ -288,11 +329,23 @@ dc_command_shape_safe() {
     DC_REFUSE_REASON="$tool could run anything or remove any path, so the never-touch list could not be checked"
     return 1
   fi
+  for arg in "${argv[@]}"; do
+    case "$arg" in
+      *volume*)
+        DC_REFUSE_REASON="Docker volumes are on the never-touch list"
+        return 1
+        ;;
+    esac
+  done
   case "$tool" in
+    docker-compose | podman | podman-compose | nerdctl | colima | limactl | lima | crictl | ctr | container)
+      DC_REFUSE_REASON="$tool can delete container volumes or the VM that holds them, and no form of it is reviewed here"
+      return 1
+      ;;
     docker)
       for arg in "${argv[@]}"; do
         case "$arg" in
-          *volume* | -v)
+          -v)
             DC_REFUSE_REASON="Docker volumes are on the never-touch list"
             return 1
             ;;
@@ -512,18 +565,27 @@ dc_indent_tail() { # file lines
 
 # ---- Bounded processes ---------------------------------------------------------
 
+# A process run through sudo belongs to root, so this user cannot signal it and kill -0
+# fails while it runs. Only ps saying there is no such process (status 1) means gone: a
+# ps that was itself interrupted or failed proves nothing, so the deadline keeps running.
 dc_leader_running() {
-  local state
-  kill -0 "$1" 2>/dev/null || return 1
-  state="$(ps -o stat= -p "$1" 2>/dev/null | tr -d '[:space:]' || true)"
-  [[ -n "$state" ]] || return 0
+  local state status=0
+  state="$(ps -o stat= -p "$1" 2>/dev/null)" || status=$?
+  [[ "$status" -ne 1 ]] || return 1
+  [[ "$status" -eq 0 ]] || return 0
+  state="${state//[[:space:]]/}"
   [[ "$state" != Z* ]]
 }
 
 dc_group_alive() {
-  local snapshot
-  # No member at all answers without paying for a full process list.
-  kill -0 -- "-$1" 2>/dev/null || return 1
+  local snapshot answer
+  # "No such process" settles it without a full process list, which this runs often. Any
+  # other answer, such as a group this user cannot signal, needs ps to say.
+  if ! answer="$(LC_ALL=C kill -0 -- "-$1" 2>&1)"; then
+    case "$answer" in
+      *"No such process"*) return 1 ;;
+    esac
+  fi
   snapshot="$(LC_ALL=C ps -eo pgid=,stat= 2>/dev/null)" || return 0
   awk -v wanted="$1" '$1 == wanted && $2 !~ /^Z/ { found = 1 } END { exit !found }' <<<"$snapshot"
 }
@@ -531,6 +593,8 @@ dc_group_alive() {
 # TERM, a short grace, then KILL. Returns 1 when the group could not be confirmed gone.
 dc_stop_group() {
   local group="$1" try
+  # Otherwise this shell prints its own raw line about the job it is about to kill.
+  disown "$group" 2>/dev/null || true
   kill -TERM -- "-$group" 2>/dev/null || true
   for try in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     dc_group_alive "$group" || break
@@ -545,10 +609,9 @@ dc_stop_group() {
   fi
   : "$try"
   if dc_group_alive "$group"; then
-    echo "    The process could not be confirmed stopped." >&2
+    echo "    The process could not be stopped and may still be running." >&2
     return 1
   fi
-  wait "$group" 2>/dev/null || true
 }
 
 dc_restore_traps() {
@@ -562,7 +625,9 @@ dc_restore_traps() {
 # stdout, and FILE.err gets stderr. Returns the command's status, or 124 only at
 # this deadline. A signal this process saw, or a group that could not be confirmed
 # gone, ends the whole run from here: a command that merely exits 130 is a failed
-# command, not an interrupted run. Never call this from a command substitution.
+# command, not an interrupted run. A command run through sudo cannot be signalled, so
+# its deadline or a Ctrl-C ends the run with 125, and the run says it may still be
+# running. Never call this from a command substitution.
 dc_bounded() {
   local label="$1" seconds="$2" output="$3"
   shift 3
@@ -576,11 +641,14 @@ dc_bounded() {
   trap 'signal_status=143' TERM
   case "$-" in *m*) monitor=1 ;; esac
   set -m
-  if [[ "$output" == "-" ]]; then
-    "$@" </dev/null &
-  else
-    "$@" </dev/null >"$output" 2>"$output.err" &
-  fi
+  # The outer redirect only quiets this shell's own rare setpgid race message.
+  {
+    if [[ "$output" == "-" ]]; then
+      "$@" </dev/null 2>&3 3>&- &
+    else
+      "$@" </dev/null >"$output" 2>"$output.err" 3>&- &
+    fi
+  } 3>&2 2>/dev/null
   child=$!
   [[ "$monitor" -eq 1 ]] || set +m
   started="$(date +%s)"
@@ -689,6 +757,12 @@ dc_mutate() { # label argv...
   return "$status"
 }
 
+# Returns 0 when sudo works right now without a password. A step that needs it checks
+# this in its plan and, when it fails, says what to run by hand. It never asks.
+dc_sudo_active() {
+  dc_query "check administrator permission" sudo -n true
+}
+
 # Put a tool managed by mise ahead of PATH, so cleanup acts on the copy the user
 # works with. A machine without mise keeps its PATH.
 dc_prefer_mise_tool() { # tool
@@ -795,6 +869,17 @@ dc_step() { # level lane id title
   case "$1" in auto | ask) ;; *) dc_invalid_steps "unknown level: $1" ;; esac
   case "$2" in tool | any) ;; *) dc_invalid_steps "unknown lane: $2" ;; esac
   [[ "$3" =~ ^[a-z0-9-]+$ ]] || dc_invalid_steps "bad step id: $3"
+  # These rules belong to the shared steps, so one wrong word cannot weaken them.
+  case "$3:$1" in
+    trash:auto | docker-images:auto)
+      dc_invalid_steps "$3 must ask first."
+      ;;
+  esac
+  case "$3:$2" in
+    docker-build-cache:any | docker-images:any | npm-cache:any)
+      dc_invalid_steps "$3 must stand down while test processes run, so its lane is tool."
+      ;;
+  esac
   dc_step_levels+=("$1")
   dc_step_lanes+=("$2")
   dc_step_ids+=("$3")
@@ -813,7 +898,7 @@ dc_load_steps() {
   # shellcheck source=/dev/null
   . "$dc_steps_file"
   declare -F dc_adapter_steps >/dev/null || dc_invalid_steps "dc_adapter_steps is missing."
-  dc_adapter_steps
+  dc_adapter_steps || dc_invalid_steps "dc_adapter_steps failed."
   for ((i = 0; i < ${#dc_step_ids[@]}; i++)); do
     fn="${dc_step_ids[$i]//-/_}"
     declare -F "dc_plan_$fn" >/dev/null || dc_invalid_steps "dc_plan_$fn is missing."
@@ -830,12 +915,20 @@ dc_plan_reset() {
   DC_PLAN_KEY=""
 }
 
+# Plans run with errexit on, so a failed command cannot leave a half-checked plan that
+# then acts. If one stops the run, dc_on_exit names it and still prints the report.
 dc_plan() { # index
   dc_plan_reset
+  dc_active_title="${dc_step_titles[$1]}"
   "dc_plan_${dc_step_ids[$1]//-/_}"
+  dc_active_title=""
+  # L1: a question must have an identity to compare before it acts.
+  if [[ "${dc_step_levels[$1]}" == ask && "$DC_PLAN_STATE" == ready && -z "$DC_PLAN_KEY" ]]; then
+    DC_PLAN_STATE="unavailable"
+    DC_PLAN_TEXT="its check named nothing to compare before acting"
+  fi
 }
 
-dc_cleared=0
 dc_failed=0
 dc_failed_names=""
 
@@ -850,7 +943,6 @@ dc_act() { # index
   "dc_act_$fn" || status=$?
   case "$status" in
     0)
-      dc_cleared=$((dc_cleared + 1))
       printf '  %s: cleared.%s\n' "$title" "${DC_ACT_TEXT:+ $DC_ACT_TEXT}"
       ;;
     77)
@@ -1048,6 +1140,11 @@ dc_ask_phase() {
       printf '  %s: skipped because it changed after the question. Run this again to see the new sizes.\n' "$title"
       continue
     fi
+    # Those checks can take a while, so a test run may have started since.
+    if dc_lane_blocks "$index"; then
+      printf '  %s: skipped because %s.\n' "$title" "$dc_lane_summary"
+      continue
+    fi
     dc_act "$index"
   done
   dc_lock_release
@@ -1097,7 +1194,9 @@ dc_print_top() { # heading file
     echo "    none measured"
     return 0
   fi
-  LC_ALL=C sort -t "$(printf '\t')" -k1,1nr "$2" | head -n "$DC_TOP_FOLDERS" >"$2.top"
+  # Two steps: under pipefail, head closing early would fail the whole run.
+  LC_ALL=C sort -t "$(printf '\t')" -k1,1nr "$2" >"$2.sorted"
+  head -n "$DC_TOP_FOLDERS" "$2.sorted" >"$2.top"
   while IFS=$'\t' read -r size path; do
     printf '    %10s  %s\n' "$(dc_format_kib "$size")" "$(dc_home_display "$path" | dc_clean_text)"
   done <"$2.top"
@@ -1113,7 +1212,7 @@ dc_scan_worker() { # NUL-separated folder list
 }
 
 dc_report_folders() {
-  local status=0 list raw home_rows code_rows code_root="$HOME/code" code_scan="" unfinished path_line
+  local status=0 list raw home_rows code_rows code_root="$HOME/code" code_scan="" unfinished path_line list_failed=0
   dc_temp
   list="$dc_tempfile"
   : >"$list"
@@ -1132,11 +1231,11 @@ dc_report_folders() {
   fi
   status=0
   dc_query "list folders" find "$HOME" -mindepth 1 -maxdepth 1 -type d ! -path "$code_root" -print0 || status=$?
-  [[ "$status" -ne 0 ]] || cat "$dc_output" >>"$list"
+  if [[ "$status" -eq 0 ]]; then cat "$dc_output" >>"$list"; else list_failed=1; fi
   if [[ -n "$code_scan" ]]; then
     status=0
     dc_query "list code folders" find "$code_scan" -mindepth 1 -maxdepth 1 -type d -print0 || status=$?
-    [[ "$status" -ne 0 ]] || cat "$dc_output" >>"$list"
+    if [[ "$status" -eq 0 ]]; then cat "$dc_output" >>"$list"; else list_failed=1; fi
   fi
   status=0
   if [[ -s "$list" ]]; then
@@ -1169,9 +1268,14 @@ dc_report_folders() {
   case "$status" in
     0) ;;
     124)
-      unfinished="$(LC_ALL=C tr '\0' '\n' <"$list" | LC_ALL=C awk -F '\t' '
-        NR == FNR { if (index($0, "\t")) done[substr($0, index($0, "\t") + 1)] = 1; next }
-        !($0 in done)' "$raw" - | head -n 5)"
+      unfinished="$(LC_ALL=C tr '\0' '\n' <"$list" | LC_ALL=C awk -v raw="$raw" '
+        BEGIN {
+          while ((getline line < raw) > 0) {
+            if (index(line, "\t")) done[substr(line, index(line, "\t") + 1)] = 1
+          }
+          close(raw)
+        }
+        !($0 in done) && shown < 5 { print; shown++ }')"
       echo "  The folder scan stopped at its ${DC_REPORT_DEADLINE_SECONDS}s limit, so these lists are incomplete."
       if [[ -n "$unfinished" ]]; then
         echo "  Did not finish in time, and these are often the biggest:"
@@ -1182,6 +1286,9 @@ dc_report_folders() {
       ;;
     *) echo "  Some folders could not be read, so these sizes can be low." ;;
   esac
+  if [[ "$list_failed" -eq 1 ]]; then
+    echo "  A folder could not be listed, so these lists can be incomplete."
+  fi
 }
 
 # Called by a steps file from dc_adapter_report_paths.
@@ -1189,7 +1296,7 @@ dc_report_path() { # label path note
   local status=0
   [[ -e "$2" ]] || return 0
   dc_measure_kib "$2" || status=$?
-  if [[ "$status" -ne 0 || -z "${dc_kib:-}" ]]; then
+  if [[ "$status" -ne 0 ]]; then
     printf '  %s: at %s, but it could not be read. %s\n' "$1" "$(dc_home_display "$2")" "${3:-}"
     return 0
   fi
@@ -1202,7 +1309,7 @@ dc_report() {
   dc_report_free_space
   dc_report_folders
   if declare -F dc_adapter_report_paths >/dev/null; then
-    dc_adapter_report_paths
+    dc_adapter_report_paths || echo "  Some extra report lines could not be produced."
   fi
   if [[ "$dc_low_space" -eq 1 ]]; then
     printf '  Warning: less than %s%% of this volume is free.%s\n' \
@@ -1213,14 +1320,12 @@ dc_report() {
 # ---- Run -----------------------------------------------------------------------
 
 # Default stores are recognized by path and shape. A store configured elsewhere needs
-# pnpm's own answer. This query must never download a package manager or a tool.
+# pnpm's own answer.
 dc_load_pnpm_store() {
   local status=0 store
   dc_pnpm_store=""
   command -v pnpm >/dev/null 2>&1 || return 0
-  COREPACK_ENABLE_NETWORK=0 MISE_OFFLINE=1 MISE_AUTO_INSTALL=0 MISE_EXEC_AUTO_INSTALL=0 \
-    MISE_NOT_FOUND_AUTO_INSTALL=0 MISE_TASK_RUN_AUTO_INSTALL=0 \
-    dc_query "pnpm store path" pnpm store path || status=$?
+  dc_query "pnpm store path" pnpm store path || status=$?
   store="$(head -n 1 "$dc_output" 2>/dev/null || true)"
   case "$status:$store" in
     0:/*[[:cntrl:]]*) ;;
@@ -1244,7 +1349,22 @@ dc_on_exit() {
       echo "Disk cleanup was interrupted. A step that had already started may have finished part of its work." >&2
       ;;
     125)
-      echo "Disk cleanup stopped because a process could not be confirmed gone. A step that had already started may have finished part of its work." >&2
+      echo "Disk cleanup stopped because a process could not be stopped, and it may still be running. A step that had already started may have finished part of its work." >&2
+      ;;
+    0) ;;
+    *)
+      if [[ -n "${dc_active_title:-}" && -n "$dc_work" ]]; then
+        set +e
+        printf '  %s: its check stopped unexpectedly (exit %s), so no later step ran.\n' "$dc_active_title" "$status"
+        dc_active_title=""
+        dc_lock_release
+        dc_report
+        echo
+        printf 'Disk cleanup finished with a failed check. A steps file must guard what it runs in a plan.\n'
+        status=1
+      elif [[ "${dc_finished:-0}" -ne 1 && -n "$dc_work" ]]; then
+        echo "Disk cleanup stopped unexpectedly (exit $status). A step that had already started may have finished part of its work." >&2
+      fi
       ;;
   esac
   dc_lock_release || true
@@ -1253,17 +1373,31 @@ dc_on_exit() {
 }
 
 cmd_run() {
+  # Root would leave root-owned files in this user's caches, and HOME could be anyone's.
+  if [[ "$(id -u 2>/dev/null || echo unknown)" == 0 ]]; then
+    echo "disk-cleanup: run this as your own user. Steps use sudo -n where they need it. Nothing was changed." >&2
+    exit 1
+  fi
   dc_load_steps
   trap dc_on_exit EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  dc_work="$(mktemp -d "${TMPDIR:-/tmp}/groundwork-disk-cleanup.XXXXXX")"
+  # Cleanup never downloads a package manager or a tool, whatever a shim would do.
+  export COREPACK_ENABLE_NETWORK=0 MISE_OFFLINE=1 MISE_AUTO_INSTALL=0 MISE_EXEC_AUTO_INSTALL=0 \
+    MISE_NOT_FOUND_AUTO_INSTALL=0 MISE_TASK_RUN_AUTO_INSTALL=0
+  if ! dc_work="$(mktemp -d "${TMPDIR:-/tmp}/groundwork-disk-cleanup.XXXXXX" 2>/dev/null)"; then
+    dc_work=""
+    echo "disk-cleanup: could not create a temporary folder, which often means the disk is full. Nothing was changed." >&2
+    df -Pk "$HOME" >&2 || true
+    exit 1
+  fi
   if declare -F dc_adapter_prepare >/dev/null; then
-    dc_adapter_prepare
+    dc_adapter_prepare || echo "  The steps file's setup did not finish, so a tool may be found differently."
   fi
   if [[ "$dc_mode" == report-only ]]; then
     dc_report
+    dc_finished=1
     return 0
   fi
   dc_load_pnpm_store
@@ -1280,6 +1414,7 @@ cmd_run() {
   dc_auto_phase
   dc_ask_phase
   dc_report
+  dc_finished=1
   if [[ "$dc_failed" -gt 0 ]]; then
     echo
     printf 'Disk cleanup finished with %s failed step(s): %s\n' "$dc_failed" "$dc_failed_names"
@@ -1330,6 +1465,14 @@ main() {
   dc_load_policy
   # shellcheck source=shared-steps.sh
   . "$dc_root/shared-steps.sh"
+  case "$subcommand" in
+    run | never-touch | check-path | check-command)
+      if ! dc_never_touch_readable; then
+        echo "disk-cleanup: the never-touch list is missing or empty: $dc_root/never-touch.tsv. Nothing was changed." >&2
+        exit 1
+      fi
+      ;;
+  esac
   case "$subcommand" in
     run | check-command) dc_declare_shared_commands ;;
   esac

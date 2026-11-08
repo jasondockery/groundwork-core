@@ -21,6 +21,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+with tempfile.TemporaryDirectory() as _probe:
+    (Path(_probe) / "Case").touch()
+    CASE_INSENSITIVE = (Path(_probe) / "case").exists()
 DIR = ROOT / "disk-cleanup"
 SCRIPT = DIR / "disk-cleanup.sh"
 VECTORS = DIR / "test-lane-vectors.tsv"
@@ -318,6 +321,45 @@ class NeverTouchTest(Fixture):
         for path in (self.home / "safe", self.home / "safe/x", self.home / ".npm", self.home / ".Trash/x", self.tmp):
             self.assertFalse(self.protected(path), path)
 
+    def test_a_missing_or_empty_list_stops_everything(self):
+        with tempfile.TemporaryDirectory() as temp:
+            copy = Path(temp) / "disk-cleanup"
+            shutil.copytree(DIR, copy)
+            script = copy / "disk-cleanup.sh"
+            listing = copy / "never-touch.tsv"
+            for broken in ("missing", "empty", "only comments"):
+                if listing.exists():
+                    listing.unlink()
+                if broken == "empty":
+                    listing.write_text("")
+                if broken == "only comments":
+                    listing.write_text("# nothing\n")
+                for args in (["check-path", str(self.home / ".ssh/id")], ["never-touch"],
+                             ["check-command", "--", "npm", "cache", "clean", "--force"],
+                             ["run", "--steps", str(self.steps)]):
+                    result = subprocess.run([str(script), *args], env=self.env, stdin=subprocess.DEVNULL,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1, (broken, args))
+                    self.assertIn("never-touch list is missing or empty", result.stderr, (broken, args))
+        self.assertEqual(self.commands(), [])
+        self.assert_no_mutation()
+
+    def test_an_entry_that_cannot_be_resolved_protects_rather_than_passes(self):
+        (self.home / ".aws").symlink_to(self.home / ".aws")
+        self.assertTrue(self.protected(self.home / "safe"))
+
+    @unittest.skipUnless(CASE_INSENSITIVE, "this volume is case-sensitive")
+    def test_a_case_variant_of_a_listed_path_is_the_same_path(self):
+        (self.home / ".config/gh").mkdir(parents=True)
+        (self.home / "code").mkdir()
+        (self.home / "code/app").mkdir()
+        for path in ("~/.SSH", "~/.SSH/id", "~/.Ssh/new", "~/CODE", "~/Code/app", "~/Code/new-file",
+                     "~/.CONFIG/GH", "~/.Config", "~/.CONFIG/GH/hosts.yml"):
+            self.assertTrue(self.protected(path), path)
+        self.assertFalse(self.protected("~/.CONFIG/other"))
+        result = self.run_script("check-command", "--", "npm", "cache", "clean", "--force", "--cache", "~/.SSH")
+        self.assertEqual(result.returncode, 1)
+
     def test_a_folder_holding_home_is_protected(self):
         self.assertTrue(self.protected(self.root))
 
@@ -453,6 +495,35 @@ class NeverTouchTest(Fixture):
             self.assertEqual(result.returncode, 1, declaration)
             self.assertIn("Nothing was changed", result.stderr, declaration)
         self.assertEqual(self.commands(), [])
+
+    def test_a_steps_file_cannot_weaken_a_shared_step(self):
+        for declaration, reason in (
+            ('dc_step auto any trash "Trash"', "must ask first"),
+            ('dc_step auto tool trash "Trash"', "must ask first"),
+            ('dc_step auto tool docker-images "Images"', "must ask first"),
+            ('dc_step auto any docker-build-cache "Cache"', "must stand down"),
+            ('dc_step ask any docker-images "Images"', "must stand down"),
+            ('dc_step auto any npm-cache "npm"', "must stand down"),
+        ):
+            self.steps.write_text(f"dc_adapter_steps() {{ {declaration}; }}\nDC_TRASH_DIR=\"$HOME/.Trash\"\n")
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, declaration)
+            self.assertIn(reason, result.stderr, declaration)
+        self.assert_no_mutation()
+
+    def test_no_tool_that_can_delete_volumes_can_be_named(self):
+        for argv in (
+            ["docker-compose", "down", "-v"], ["docker-compose", "down", "--volumes"],
+            ["podman", "volume", "prune", "--force"], ["podman", "system", "prune", "--volumes"],
+            ["podman", "image", "prune"], ["nerdctl", "volume", "prune"], ["colima", "delete", "--force"],
+            ["limactl", "delete", "default"], ["anything", "--volumes"], ["anything", "volume-prune"],
+        ):
+            self.assertEqual(self.run_script("check-command", "--", *argv).returncode, 1, argv)
+            words = " ".join(argv)
+            self.steps.write_text(f"dc_adapter_steps() {{ dc_allow_command {words}; }}\n")
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, argv)
+            self.assertIn("Nothing was changed", result.stderr, argv)
 
     def test_a_refusal_says_why(self):
         for argv, reason in (
@@ -686,6 +757,21 @@ class TestLaneTest(Fixture):
         self.assertIn("Docker build cache: skipped because test processes are running", result.stdout)
         self.assertEqual([c for c in self.commands() if "prune" in c], [])
 
+    def test_a_lane_that_starts_during_the_recheck_stops_an_ask_step(self):
+        self.fake_ps("  10 /sbin/launchd\n")
+        self.write_tool("docker", FAKE_DOCKER.replace(
+            '"system df") cat "$state/df" ;;',
+            '''"system df")
+    [[ ! -f "$FAKE_STATE/arm" ]] || printf "  20 pnpm test\\n" >"$FAKE_STATE/ps-listing"
+    cat "$state/df"
+    ;;''',
+        ))
+        arm = lambda: (self.state / "arm").touch()
+        code, output = self.run_pty(answers=[b"y\n", b"n\n"], before_answer={1: arm})
+        self.assertEqual(code, 0, output)
+        self.assertIn("Unused Docker images: skipped because test processes are running", output)
+        self.assertNotIn("docker image prune --all --force", self.commands())
+
     def test_a_lane_that_starts_later_stops_the_next_step(self):
         # The npm step starts a lane; the Docker step must see it.
         self.fake_ps("  10 /sbin/launchd\n")
@@ -699,6 +785,103 @@ class TestLaneTest(Fixture):
         self.assertEqual([c for c in self.commands() if "prune" in c], [])
 
 
+class PlanFailureTest(Fixture):
+    def test_a_plan_that_stops_is_named_and_the_report_still_runs(self):
+        for body in ('dc_query q false; DC_PLAN_STATE=ready; DC_PLAN_TEXT=x', '[[ -x /no/such/tool ]] && DC_PLAN_STATE=ready'):
+            self.steps.write_text(textwrap.dedent(f"""\
+                dc_adapter_steps() {{
+                  dc_allow_command logged
+                  dc_step auto any broken "Broken"
+                  dc_step auto tool npm-cache "npm cache"
+                }}
+                dc_plan_broken() {{ {body}; }}
+                dc_act_broken() {{ printf 'acted\\n' >>"$FAKE_LOG"; }}
+                """))
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, body)
+            self.assertIn("Broken: its check stopped unexpectedly", result.stdout, body)
+            self.assertIn("Disk report", result.stdout, body)
+            self.assertIn("A steps file must guard what it runs in a plan", result.stdout, body)
+            self.assertNotIn("acted", self.log.read_text(), body)
+            self.assert_no_mutation()
+
+    def test_a_failing_setup_hook_says_so_and_the_run_continues(self):
+        self.steps.write_text(STEPS + "dc_adapter_prepare() { false; }\n")
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("setup did not finish", result.stdout)
+        self.assertIn(self.npm_clean(), self.commands())
+
+    def test_a_failing_report_hook_keeps_the_warning_and_the_failed_steps(self):
+        self.write_tool("df", (
+            "#!/bin/bash\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+            "echo '/dev/x 100000 95000 5000 95% /'\n"
+        ))
+        self.write_tool("npm", FAKE_NPM.replace('"cache clean") rm -rf "$HOME/.npm/_cacache" ;;', '"cache clean") exit 3 ;;'))
+        self.steps.write_text(STEPS + "dc_adapter_report_paths() { false; }\n")
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Some extra report lines could not be produced", result.stdout)
+        self.assertIn("Warning: less than 15%", result.stdout)
+        self.assertIn("1 failed step(s): npm cache", result.stdout)
+
+    def test_a_failing_steps_function_is_named(self):
+        self.steps.write_text("dc_adapter_steps() { false; }\n")
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("dc_adapter_steps failed", result.stderr)
+
+    def test_an_ask_step_with_no_identity_is_not_offered(self):
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() { dc_step ask any keyless "Keyless"; }
+            dc_plan_keyless() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; DC_PLAN_COMMAND=y; }
+            dc_act_keyless() { printf 'acted\\n' >>"$FAKE_LOG"; }
+            """))
+        code, output = self.run_pty()
+        self.assertEqual(code, 0, output)
+        self.assertIn("Keyless: not available (its check named nothing to compare before acting)", output)
+        self.assertNotIn("acted", self.log.read_text())
+
+    def test_a_step_owned_elsewhere_runs_nothing_and_says_who_owns_it(self):
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() { dc_step auto any owned "Owned"; }
+            dc_plan_owned() { DC_PLAN_STATE=elsewhere; DC_PLAN_TEXT="Another stage owns this."; }
+            dc_act_owned() { printf 'acted\\n' >>"$FAKE_LOG"; }
+            """))
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Owned: Another stage owns this.", result.stdout)
+        self.assertNotIn("acted", self.log.read_text())
+
+    def test_a_setup_hook_can_prefer_the_mise_tool(self):
+        mise_bin = self.root / "mise-bin"
+        mise_bin.mkdir()
+        (mise_bin / "npm").write_text(
+            '#!/bin/bash\nprintf "mise-npm %s\\n" "$*" >>"$FAKE_LOG"\ncase "$1" in config) echo "$HOME/.npm" ;; esac\n')
+        (mise_bin / "npm").chmod(0o755)
+        self.write_tool("mise", f'#!/bin/bash\necho {mise_bin}/npm\n')
+        self.steps.write_text(STEPS + "dc_adapter_prepare() { dc_prefer_mise_tool npm; }\n")
+        self.run_steps()
+        self.assertIn(f"mise-npm cache clean --force --cache {self.home}/.npm", self.commands())
+
+    def test_the_sudo_helper_never_asks(self):
+        self.write_tool("sudo", '#!/bin/bash\nprintf "sudo %s\\n" "$*" >>"$FAKE_LOG"\nexit 1\n')
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() { dc_allow_command sudo -n apt-get clean; dc_step auto tool apt "apt"; }
+            dc_plan_apt() {
+              local status=0
+              dc_sudo_active || status=$?
+              if [[ "$status" -ne 0 ]]; then DC_PLAN_TEXT="To clear it: sudo apt-get clean"; return 0; fi
+              DC_PLAN_STATE=ready; DC_PLAN_TEXT=x
+            }
+            dc_act_apt() { dc_mutate apt sudo -n apt-get clean; }
+            """))
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.commands(), ["sudo -n true"])
+        self.assertIn("To clear it: sudo apt-get clean", result.stdout)
+
+
 class DryRunTest(Fixture):
     def test_shows_every_level_and_runs_nothing_that_changes_state(self):
         result = self.run_steps("--dry-run")
@@ -707,7 +890,7 @@ class DryRunTest(Fixture):
         self.assertIn(f"Would run: {self.npm_clean()}", result.stdout)
         self.assertIn("Would run: docker builder prune --all --force --filter until=168h", result.stdout)
         self.assertIn("Would ask, then run: docker image prune --all --force", result.stdout)
-        self.assertRegex(result.stdout, r"Trash: 1 item\(s\), \d+ KiB\.")
+        self.assertRegex(result.stdout, r"Trash: 1 item\(s\), \d+ KiB in all\.")
         self.assertIn("Disk report", result.stdout)
         self.assert_no_mutation()
 
@@ -778,6 +961,36 @@ esac
         self.assertIn(self.npm_clean(), self.commands())
         self.assertEqual((self.home / ".ssh/id").read_text(), "key\n")
         self.assertFalse((self.home / ".npm").exists())
+
+    def test_only_what_npm_cache_clean_removes_counts_toward_the_limit(self):
+        shutil.rmtree(self.home / ".npm/_cacache")
+        self.fill(self.home / ".npm/_cacache/small", 8)
+        self.fill(self.home / ".npm/_npx/big", 4096)
+        result = self.run_steps()
+        self.assertIn("npm cache: nothing to clear", result.stdout)
+        self.assertFalse([c for c in self.commands() if "cache clean" in c])
+
+    def test_nothing_in_a_run_may_download_a_tool(self):
+        self.write_tool("npm", r"""#!/bin/bash
+printf 'npm-env net=%s offline=%s auto=%s\n' "${COREPACK_ENABLE_NETWORK:-}" "${MISE_OFFLINE:-}" "${MISE_AUTO_INSTALL:-}" >>"$FAKE_LOG"
+case "$1 ${2:-}" in "config get") echo "$HOME/.npm" ;; esac
+""")
+        self.run_steps("--dry-run")
+        self.assertIn("npm-env net=0 offline=1 auto=0", self.commands())
+
+    def test_no_temporary_folder_says_so_and_changes_nothing(self):
+        result = self.run_steps(env={"TMPDIR": str(self.root / "no-such-folder")})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("could not create a temporary folder", result.stderr)
+        self.assert_no_mutation()
+
+    def test_root_is_refused_before_anything_runs(self):
+        self.write_tool("id", '#!/bin/bash\necho 0\n')
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("run this as your own user", result.stderr)
+        self.assertEqual(self.commands(), [])
+        (self.bin / "id").unlink()
 
     def test_npm_cache_under_the_limit_stays(self):
         self.fill(self.home / ".npm/_cacache/blob", 100)
@@ -923,7 +1136,7 @@ class PromptTest(Fixture):
     def test_the_question_shows_the_size_and_keeps_volumes(self):
         _, output = self.run_pty(answers=[b"n\n", b"n\n"])
         self.assertIn("Remove 10 unused Docker image(s), 5GB (55%)? Containers and volumes stay", output)
-        self.assertIn("Empty the Trash, 1 item(s),", output)
+        self.assertIn("Empty the Trash, 1 of 1 item(s), up to", output)
 
     def test_enter_and_no_keep_everything(self):
         code, output = self.run_pty(answers=[b"\n", b"no\n"])
@@ -1084,6 +1297,22 @@ class TrashTest(Fixture):
         self.assertNotIn("Trash: cleared", output)
         self.assertIn("what remains is unknown", output)
         self.assertIn("1 failed step(s): Trash", output)
+
+    def test_a_trash_holding_only_a_checkout_is_not_asked_about(self):
+        (self.home / ".Trash/old-report.pdf").unlink()
+        (self.home / ".Trash/some-repo/.git").mkdir(parents=True)
+        code, output = self.run_pty(answers=[b"n\n"])
+        self.assertEqual(code, 0, output)
+        self.assertIn("Trash: nothing to clear (1 item(s) that hold a Git checkout", output)
+        self.assertNotIn("Empty the Trash", output)
+        self.assertTrue((self.home / ".Trash/some-repo/.git").exists())
+
+    def test_the_question_says_what_stays(self):
+        (self.home / ".Trash/some-repo/.git").mkdir(parents=True)
+        code, output = self.run_pty(answers=[b"n\n", b"n\n"])
+        self.assertEqual(code, 0, output)
+        self.assertIn("Empty the Trash, 1 of 2 item(s), up to", output)
+        self.assertIn("1 item(s) that hold a Git checkout or could not be fully searched stay.", output)
 
     def test_an_item_that_is_a_symlink_goes_but_its_target_stays(self):
         self.fill(self.home / "target/file", 4)
@@ -1284,6 +1513,48 @@ class ReportTest(Fixture):
         self.assertNotIn("~/code/app", home_part)
         self.assertIn("~/code/app-11", code_part.strip().splitlines()[0])
 
+    def test_many_folders_cannot_end_the_run(self):
+        # One fake du prints enough rows that sort outlives a head that stops reading.
+        (self.home / "code/one").mkdir(parents=True)
+        long_name = "a-long-folder-name-so-the-rows-outgrow-a-pipe-buffer-" * 2
+        self.write_tool("du", (
+            '#!/bin/bash\nfor ((i = 0; i < 2000; i++)); do\n'
+            f'  printf "8\\t%s/code/{long_name}%d\\n" "$HOME" "$i"\ndone\n'
+        ))
+        result = self.run_steps("--report-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len([line for line in result.stdout.splitlines() if f"~/code/{long_name}" in line]), 10)
+
+    def test_no_pipe_into_head_under_pipefail(self):
+        # A reader that stops early would end the run with 141.
+        for script in (SCRIPT, DIR / "shared-steps.sh"):
+            for number, line in enumerate(script.read_text().splitlines(), 1):
+                self.assertNotRegex(line, r"\|\s*head\b", f"{script.name}:{number}")
+
+    def test_many_unfinished_folders_cannot_end_the_run(self):
+        for index in range(600):
+            (self.home / f"huge-{index:04d}").mkdir()
+        self.write_tool("du", '#!/bin/bash\nexec sleep 60\n')
+        result = self.run_steps("--report-only", env={"GROUNDWORK_DISK_REPORT_DEADLINE_SECONDS": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Did not finish in time", result.stdout)
+        unfinished = result.stdout.split("Did not finish in time")[1]
+        self.assertEqual(len([line for line in unfinished.splitlines() if "~/" in line]), 5)
+
+    def test_a_scan_where_nothing_finished_still_names_folders(self):
+        (self.home / "huge").mkdir()
+        self.write_tool("du", '#!/bin/bash\nexec sleep 60\n')
+        output = self.report(GROUNDWORK_DISK_REPORT_DEADLINE_SECONDS="1")
+        self.assertIn("~/huge", output.split("Did not finish in time")[1])
+
+    def test_a_folder_list_that_fails_says_so(self):
+        real = shutil.which("find", path="/bin:/usr/bin")
+        self.write_tool("find", (
+            '#!/bin/bash\nif [[ "$*" == *"-type d"* ]]; then echo denied >&2; exit 1; fi\n'
+            f'exec {real} "$@"\n'
+        ))
+        self.assertIn("A folder could not be listed, so these lists can be incomplete", self.report())
+
     def test_no_code_folder(self):
         self.assertIn("Biggest folders under ~/code:\n    none measured", self.report())
 
@@ -1406,6 +1677,100 @@ class BoundedTest(Fixture):
         self.assertIn("Stuck: stopped at its time limit", result.stdout)
         self.assertIn(self.npm_clean(), self.commands())
         self.assert_gone()
+
+    def cannot_signal_steps(self):
+        """A command through sudo belongs to root, so kill fails while it runs."""
+        self.write_tool("asroot", '#!/bin/bash\necho $$ >"$FAKE_STATE/hang.pids"\nexec sleep 20\n')
+        self.addCleanup(self.kill_recorded_pids)
+        self.steps.write_text(textwrap.dedent("""\
+            kill() { return 1; }
+            dc_adapter_steps() {
+              dc_allow_command asroot
+              dc_step auto any stuck "Stuck"
+              dc_step auto any later "Later"
+            }
+            dc_plan_stuck() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
+            dc_act_stuck() { dc_mutate stuck asroot; }
+            dc_plan_later() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=later; }
+            dc_act_later() { printf 'later ran\\n' >>"$FAKE_LOG"; }
+            """))
+
+    def kill_recorded_pids(self):
+        pids = self.state / "hang.pids"
+        if pids.exists():
+            for pid in pids.read_text().split():
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except (ProcessLookupError, ValueError):
+                    pass
+
+    def test_a_process_that_cannot_be_signalled_keeps_its_deadline_and_says_so(self):
+        self.cannot_signal_steps()
+        started = time.monotonic()
+        result = self.run_steps(env={"GROUNDWORK_DISK_STEP_DEADLINE_SECONDS": "1"})
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertEqual(result.returncode, 125, result.stdout + result.stderr)
+        self.assertNotIn("Stuck: cleared", result.stdout)
+        self.assertIn("may still be running", result.stderr)
+        self.assertNotIn("later ran", self.log.read_text())
+
+    def test_a_ctrl_c_during_one_says_it_may_still_be_running(self):
+        self.cannot_signal_steps()
+        pids = self.state / "hang.pids"
+        started = time.monotonic()
+        code, output = self.run_pty(interrupt_when=pids.exists)
+        self.assertEqual(code, 125, output)
+        self.assertIn("may still be running", output)
+        self.assertLess(time.monotonic() - started, 15)
+
+    def test_a_ps_that_fails_proves_nothing_so_the_deadline_still_runs(self):
+        real = shutil.which("ps", path="/bin:/usr/bin")
+        self.cannot_signal_steps()
+        # Every leader check is killed, as a Ctrl-C can kill it, so it never says gone.
+        self.write_tool("ps", (
+            '#!/bin/bash\nfor a in "$@"; do [[ "$a" != stat= ]] || kill -INT $$; done\n'
+            f'exec {real} "$@"\n'
+        ))
+        started = time.monotonic()
+        result = self.run_steps(env={"GROUNDWORK_DISK_STEP_DEADLINE_SECONDS": "1"})
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertNotIn("Stuck: cleared", result.stdout)
+
+    def test_a_step_stopped_at_its_limit_prints_no_raw_shell_lines(self):
+        self.hang_steps()
+        result = self.run_steps(env={"GROUNDWORK_DISK_STEP_DEADLINE_SECONDS": "1"})
+        for raw in ("Killed", "Terminated", "setpgid", "line "):
+            self.assertNotIn(raw, result.stderr, raw)
+
+    def test_a_signal_to_the_run_stops_its_step(self):
+        for signum, status in ((signal.SIGTERM, 143), (signal.SIGHUP, 129)):
+            self.hang_steps()
+            pids = self.state / "hang.pids"
+            pids.unlink(missing_ok=True)
+            self.log.write_text("")
+            process = subprocess.Popen([str(SCRIPT), "run", "--steps", str(self.steps)], env=self.env,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            deadline = time.monotonic() + 20
+            while not pids.exists():
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.05)
+            process.send_signal(signum)
+            stdout, stderr = process.communicate(timeout=30)
+            self.assertEqual(process.returncode, status, stdout + stderr)
+            self.assertIn("interrupted", stderr)
+            self.assertFalse([c for c in self.commands() if "cache clean" in c])
+            self.assert_gone()
+
+    def test_a_slow_step_says_it_is_still_running(self):
+        self.write_tool("slowly", '#!/bin/bash\nexec sleep 3\n')
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() { dc_allow_command slowly; dc_step auto any slow "Slow"; }
+            dc_plan_slow() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
+            dc_act_slow() { dc_mutate slow slowly; }
+            """))
+        result = self.run_steps(env={"GROUNDWORK_DISK_HEARTBEAT_SECONDS": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Still running: slow", result.stderr)
 
     def test_interrupting_a_step_stops_its_tree_and_exits_130(self):
         self.hang_steps()

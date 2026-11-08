@@ -209,17 +209,19 @@ dc_npm_cache_path() {
     return 1
   fi
   dc_npm_cache="$dc_canonical"
+  # npm cache clean removes only _cacache, so that is what the limit measures.
+  dc_npm_cacache="$dc_npm_cache/_cacache"
 }
 
 dc_plan_npm_cache() {
   local limit_kib=$((DC_NPM_CACHE_CLEAN_MIB * 1024)) status=0
   dc_npm_cache_path || return 0
-  if [[ ! -d "$dc_npm_cache" ]]; then
+  if [[ ! -d "$dc_npm_cacache" ]]; then
     DC_PLAN_STATE="nothing"
     DC_PLAN_TEXT="there is no cache yet"
     return 0
   fi
-  dc_measure_kib "$dc_npm_cache" || status=$?
+  dc_measure_kib "$dc_npm_cacache" || status=$?
   if [[ "$status" -ne 0 ]]; then
     DC_PLAN_TEXT="the cache size could not be measured"
     return 0
@@ -239,7 +241,11 @@ dc_act_npm_cache() {
   # Pinned to the path the plan checked: npm's own answer could change by now.
   dc_mutate "npm cache clean" npm cache clean --force --cache "$dc_npm_cache" || status=$?
   [[ "$status" -eq 0 ]] || return "$status"
-  dc_measure_kib "$dc_npm_cache" || after_status=$?
+  if [[ -d "$dc_npm_cacache" ]]; then
+    dc_measure_kib "$dc_npm_cacache" || after_status=$?
+  else
+    dc_kib=0
+  fi
   if [[ "$after_status" -eq 0 && "$dc_kib" -le "$before" ]]; then
     DC_ACT_TEXT="Freed $(dc_format_kib "$((before - dc_kib))")."
   else
@@ -266,7 +272,7 @@ dc_trash_list() {
 }
 
 dc_plan_trash() {
-  local status=0 count
+  local status=0 count stays stays_note=""
   if [[ -z "${DC_TRASH_DIR:-}" ]]; then
     DC_PLAN_TEXT="this platform names no Trash folder"
     return 0
@@ -324,6 +330,20 @@ dc_plan_trash() {
     return 0
   fi
   dc_trash_list_file="$dc_output"
+  dc_trash_stays="$dc_work/trash-stays"
+  : >"$dc_trash_stays"
+  dc_temp
+  dc_bounded "search Trash" "$DC_OBSERVE_DEADLINE_SECONDS" "$dc_tempfile" dc_trash_find_stays "$dc_trash_list_file" "$dc_trash_stays" || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    DC_PLAN_TEXT="its items could not be searched for a Git checkout in time"
+    return 0
+  fi
+  stays="$(awk 'END { print NR + 0 }' "$dc_trash_stays")"
+  if [[ "$stays" -ge "$count" ]]; then
+    DC_PLAN_STATE="nothing"
+    DC_PLAN_TEXT="$stays item(s) that hold a Git checkout or could not be fully searched stay; remove those yourself"
+    return 0
+  fi
   status=0
   dc_measure_kib "$dc_trash_items" || status=$?
   if [[ "$status" -ne 0 ]]; then
@@ -332,10 +352,11 @@ dc_plan_trash() {
   fi
   DC_PLAN_KEY="$(LC_ALL=C tr '\0' '\n' <"$dc_trash_list_file" | LC_ALL=C sort | cksum) $dc_kib"
   DC_PLAN_STATE="ready"
-  DC_PLAN_TEXT="$count item(s), $(dc_format_kib "$dc_kib")."
+  [[ "$stays" -eq 0 ]] || stays_note=" $stays item(s) that hold a Git checkout or could not be fully searched stay."
+  DC_PLAN_TEXT="$count item(s), $(dc_format_kib "$dc_kib") in all.$stays_note"
   DC_PLAN_COMMAND="rm -rf each item, keeping any that holds a Git checkout"
   DC_PLAN_BY_HAND="empty the Trash in your file manager"
-  DC_PLAN_QUESTION="Empty the Trash, $count item(s), $(dc_format_kib "$dc_kib")? This cannot be undone."
+  DC_PLAN_QUESTION="Empty the Trash, $((count - stays)) of $count item(s), up to $(dc_format_kib "$dc_kib")? This cannot be undone.$stays_note"
 }
 
 # Returns 0 when a Trash item holds a Git checkout at any depth, or when the search
@@ -345,6 +366,16 @@ dc_trash_item_holds_checkout() { # item
   [[ ! -L "$1" && -d "$1" ]] || return 1
   found="$(find "$1" -name .git -print 2>/dev/null)" || status=$?
   [[ "$status" -ne 0 || -n "$found" ]]
+}
+
+# Names the items that stay, so the question can say so before anything goes.
+dc_trash_find_stays() { # list stays-file
+  local entry
+  while IFS= read -r -d '' entry; do
+    if dc_trash_item_holds_checkout "$entry"; then
+      printf '%s\n' "${entry##*/}" >>"$2"
+    fi
+  done <"$1"
 }
 
 # Runs in its own process group under one deadline. It works from inside the folder

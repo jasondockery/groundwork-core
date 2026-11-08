@@ -20,9 +20,9 @@ Use the environment's configuration procedure to change preferences.
 | WSL2 | `groundwork-windows` selects the same engine inside WSL. Its commands operate inside that Linux environment; Windows Update, native apps, and host permissions stay on Windows. |
 | Omarchy on Apple Silicon | `groundwork-omarchy-mac-arm64` owns personal settings. Its `update-all` delegates system updates to `omarchy update`, then applies this layer and updates the selected T3 Nightly and installed Bitwarden user Flatpak. It never applies the chezmoi engine. |
 
-`update-all` ends with shared [disk cleanup](disk-cleanup.md): it clears what its
-tool can rebuild, asks before anything bigger, and reports free space and the
-biggest folders.
+Environments pinned to a core with [disk cleanup](disk-cleanup.md) run it at the end
+of `update-all`: it clears what its tool can rebuild, asks before anything bigger,
+and reports free space and the biggest folders.
 
 The Linux and WSL entry-point repositories hold bootstrap and platform guidance,
 not a second copy of managed configuration. Their checkout need not be pulled
