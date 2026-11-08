@@ -463,14 +463,64 @@ class NeverTouchTest(Fixture):
         ):
             self.assertIn(reason, self.run_script("check-command", "--", *argv).stdout, argv)
 
-    def test_a_folder_named_like_a_subcommand_does_not_stop_a_command(self):
+    def test_a_folder_named_like_a_subcommand_does_not_stop_a_named_command(self):
         (self.home / "builder/.git").mkdir(parents=True)
         (self.home / "cache/.git").mkdir(parents=True)
+        (self.home / "c/.git").mkdir(parents=True)
+        (self.home / "uk1/.git").mkdir(parents=True)
         self.assertEqual(self.run_script("check-command", "--", "docker", "builder", "prune", "--all", "--force",
                                          "--filter", "until=168h").returncode, 0)
         self.assertEqual(self.run_script("check-command", "--", "npm", "cache", "clean", "--force").returncode, 0)
-        # An rm argument is always a path.
-        self.assertEqual(self.run_script("check-command", "--", "rm", "-rf", "cache").returncode, 1)
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() {
+              dc_allow_command yay -Sc --aur --noconfirm
+              dc_allow_command sudo -n paccache -ruk1 --nocolor
+            }
+            """))
+        for argv in (["yay", "-Sc", "--aur", "--noconfirm"], ["sudo", "-n", "paccache", "-ruk1", "--nocolor"]):
+            result = self.run_script("check-command", "--steps", str(self.steps), "--", *argv)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_later_argument_is_always_checked_whatever_its_spelling(self):
+        (self.home / "cache/.git").mkdir(parents=True)
+        (self.home / ".ssh").mkdir(exist_ok=True)
+        (self.home / "store").symlink_to(self.home / ".ssh")
+        for operand in (["--cache", "cache"], ["--cache=cache"], ["--cache", "store"], ["--cache", f"{self.home}/cache"],
+                        ["-ccache"], ["cache"]):
+            result = self.run_script("check-command", "--", "npm", "cache", "clean", "--force", *operand)
+            self.assertEqual(result.returncode, 1, operand)
+
+    def test_a_file_remover_can_never_be_named(self):
+        for tool in ("rm", "rmdir", "mv", "unlink", "shred", "truncate", "dd", "tee", "rsync", "tar"):
+            self.assertEqual(self.run_script("check-command", "--", tool, "x").returncode, 1, tool)
+            self.steps.write_text(f'dc_adapter_steps() {{ dc_allow_command {tool} x; }}\n')
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, tool)
+            self.assertIn("Nothing was changed", result.stderr, tool)
+
+    def test_a_separator_or_newline_cannot_add_a_named_command(self):
+        (self.home / "cache/.git").mkdir(parents=True)
+        for declaration in (
+            r"""dc_allow_command logged --$'\n'"npm"$'\037'"exec"$'\037'"x" """,
+            r"""dc_allow_command logged "ok"$'\037'"--delete" """,
+            r"""dc_allow_command_prefix logged $'\n'"npm" """,
+        ):
+            self.steps.write_text(f"dc_adapter_steps() {{ {declaration}; }}\n")
+            result = self.run_script("check-command", "--steps", str(self.steps), "--", "npm", "exec", "x")
+            self.assertEqual(result.returncode, 1, declaration)
+            self.assertIn("newline or a unit separator", result.stderr, declaration)
+        result = self.run_script("check-command", "--", "docker\037image\037prune\037--all\037--force")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("newline or a unit separator", result.stdout)
+
+    def test_a_home_folder_named_like_a_duration_breaks_nothing(self):
+        (self.home / ".ssh").mkdir(exist_ok=True)
+        (self.home / "168h").symlink_to(self.home / ".ssh")
+        self.assertEqual(self.run_script("never-touch").returncode, 0)
+        self.assertEqual(self.run_script("check-path", str(self.home / "safe")).returncode, 0)
+        self.assertEqual(self.run_script("test-lanes").returncode, 10)
+        self.assertEqual(self.run_script("check-command", "--", "docker", "builder", "prune", "--all", "--force",
+                                         "--filter", "until=168h").returncode, 0)
 
     def test_a_pnpm_store_anywhere_is_recognized_by_its_shape(self):
         (self.home / "custom-store/v10/files").mkdir(parents=True)
@@ -551,7 +601,7 @@ class TestLaneTest(Fixture):
 
     def test_status_says_what_is_running(self):
         self.fake_ps("  10 /sbin/launchd\n")
-        self.assertEqual(self.run_script("test-lanes").returncode, 1)
+        self.assertEqual(self.run_script("test-lanes").returncode, 10)
         self.fake_ps("  10 /sbin/launchd\n  20 node /w/node_modules/vitest/vitest.mjs run\n")
         result = self.run_script("test-lanes")
         self.assertEqual(result.returncode, 0)
@@ -587,6 +637,19 @@ class TestLaneTest(Fixture):
         self.assertIn("could not be listed", result.stdout)
         self.assertEqual([c for c in self.commands() if "prune" in c or "clean" in c], [])
         self.assert_no_mutation()
+
+    def test_a_broken_helper_never_reads_as_no_test_runs(self):
+        self.fake_ps("  1 /sbin/init\n")
+        with tempfile.TemporaryDirectory() as temp:
+            copy = Path(temp) / "disk-cleanup"
+            shutil.copytree(DIR, copy)
+            script = copy / "disk-cleanup.sh"
+            for missing in ("policy.env", "shared-steps.sh"):
+                saved = (copy / missing).read_text()
+                (copy / missing).unlink()
+                result = subprocess.run([str(script), "test-lanes"], env=self.env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 10, missing)
+                (copy / missing).write_text(saved)
 
     def test_missing_or_empty_patterns_stand_down(self):
         self.fake_ps("  20 node /w/node_modules/vitest/vitest.mjs run\n")

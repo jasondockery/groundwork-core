@@ -35,6 +35,9 @@ package manager test	node /opt/node/lib/node_modules/corepack/dist/corepack.js p
 -	/usr/bin/vim /Users/me/My Projects/node_modules/.bin/vitest run
 -	/bin/echo /work/node_modules/.bin/jest --ci
 -	/bin/echo /work/node_modules/.bin/playwright test
+-	/bin/cat ./node_modules/.bin/vitest run
+-	/bin/echo ./node_modules/.bin/jest --ci
+-	/bin/echo ./node_modules/.bin/playwright test
 -	npm install playwright
 -	npm install vitest
 -	pnpm add -D jest
@@ -55,3 +58,6 @@ package manager test	node /opt/node/lib/node_modules/corepack/dist/corepack.js p
 -	claude -p run vitest and playwright test
 -	node /opt/claude/cli.js -p please run pnpm test
 -	tail -f vitest.log
+# Known limits: a command line cannot show where one argument ends.
+vitest	/bin/cat node_modules/.bin/vitest run
+-	/Users/me/My -Projects/node_modules/.bin/vitest run

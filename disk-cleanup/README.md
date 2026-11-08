@@ -41,7 +41,7 @@ dc_act_yay_cache() { dc_mutate "yay cache" yay -Sc --aur --noconfirm; }
 - `lane` is `tool` for a Docker or tool-cache step, which stands down while tests run, or `any`.
 - `dc_plan_<id>` reads only. It sets `DC_PLAN_STATE` to `ready`, `nothing`, `unavailable`, or `elsewhere` (another part of the updater owns it), and `DC_PLAN_TEXT` to one line. A ready step also sets `DC_PLAN_COMMAND`, and `DC_PLAN_BY_HAND` when a person would do it differently. An ask-first step also sets `DC_PLAN_QUESTION`, and `DC_PLAN_KEY`, an identity of what the question covers, including any size it states, compared again before it acts.
 - `dc_act_<id>` changes the machine only through `dc_mutate LABEL COMMAND...`, which runs from `$HOME`, checks the never-touch list, and enforces the deadline. It may set `DC_ACT_TEXT`. It returns the command's status. A signal the run receives ends the whole run from inside the helper, so a step does not handle one.
-- `dc_allow_command COMMAND...` names one exact command the steps file runs, and `dc_allow_command_prefix COMMAND...` names one whose later arguments vary. `dc_mutate` refuses anything else, so the whole list stays visible in review. A shell, an interpreter, a wrapper, or a protected path is refused here too, and a refused declaration stops the run before it changes anything.
+- `dc_allow_command COMMAND...` names one exact command the steps file runs, and `dc_allow_command_prefix COMMAND...` names one whose later arguments vary. `dc_mutate` refuses anything else, so the whole list stays visible in review. Every later argument of a prefix form is checked against the never-touch list when it runs, including a bare word, which means a path under `$HOME`. A shell, an interpreter, a wrapper, a file remover such as `rm`, or a word that names a protected path is refused in a declaration, and that stops the run before it changes anything.
 - `dc_query LABEL COMMAND...` runs a bounded read-only query and leaves its stdout in the file named by `dc_output`.
 
 Optional functions:
@@ -60,4 +60,4 @@ disk-cleanup.sh check-command [--steps FILE] -- COMMAND...
 disk-cleanup.sh test-lanes
 ```
 
-`test-lanes` exits 0 when test processes run, 1 when none do, and 2 when the process list or the patterns cannot be read. An updater uses it to hold back its own Docker and tool-cache work.
+`test-lanes` exits 0 when test processes run and 10 when none do. It exits 2 when the process list or the patterns cannot be read, and any other status also means a test run cannot be ruled out, so a caller stands down unless it sees 10. An updater uses it to hold back its own Docker and tool-cache work.

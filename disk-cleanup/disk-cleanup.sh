@@ -19,7 +19,9 @@ Usage:
   disk-cleanup.sh check-command [--steps FILE] -- ARG...
                                                 exit 1 when a command would be refused
   disk-cleanup.sh test-lanes                    list running test processes; exit 0
-                                                when any run, 1 when none, 2 when unknown
+                                                when any run, 10 when none, and any
+                                                other status means a test run cannot
+                                                be ruled out
   disk-cleanup.sh test-lanes --classify         read command lines on stdin and print
                                                 the matching label or - for each
   disk-cleanup.sh -h|--help                     show this help
@@ -234,27 +236,25 @@ dc_path_protected() {
   return 1
 }
 
-# A wrapper or interpreter could run anything, so what it would touch cannot be
-# checked. These can never be cleanup tools, even if a steps file names one.
+# A wrapper or interpreter could run anything, and a file remover takes any path, so
+# what they would touch cannot be checked. These can never be cleanup commands, even
+# if a steps file names one. Cleanup goes through the tool that owns the cache.
 dc_tool_can_run_anything() { # tool
   case "$1" in
     *sh | *sh[0-9]* | env | eval | exec | xargs | nohup | nice | ionice | renice | timeout | gtimeout | command | builtin | \
       busybox | toybox | stdbuf | setsid | doas | su | sudo | chroot | script | parallel | watch | find | git | make | \
       mise | npx | pnpx | bunx | bun | deno | osascript | open | python* | pypy* | perl* | ruby* | node* | php* | lua* | \
-      tclsh* | awk | gawk | mawk | nawk | sed | gsed)
+      tclsh* | awk | gawk | mawk | nawk | sed | gsed | rm | rmdir | unlink | mv | cp | ln | dd | tee | install | shred | \
+      truncate | rsync | tar | chmod | chown)
       return 0
       ;;
   esac
   return 1
 }
 
-# Words these commands take that are not paths, so a folder named ~/cache or ~/image
-# does not stop a command.
-dc_command_words=" builder image prune cache clean simctl delete unavailable runtime store "
-
-# Everything a command must satisfy whoever names it. Sets DC_REFUSE_REASON.
+# Everything a command must satisfy, whoever names it. Sets DC_REFUSE_REASON.
 dc_command_shape_safe() {
-  local start=0 tool arg value index
+  local start=0 tool arg
   local -a argv
   argv=("$@")
   DC_REFUSE_REASON=""
@@ -262,6 +262,14 @@ dc_command_shape_safe() {
     DC_REFUSE_REASON="the command is empty"
     return 1
   fi
+  for arg in "${argv[@]}"; do
+    case "$arg" in
+      *$'\n'* | *$'\037'*)
+        DC_REFUSE_REASON="an argument holds a newline or a unit separator"
+        return 1
+        ;;
+    esac
+  done
   if [[ "${argv[0]}" == sudo ]]; then
     if [[ "${argv[1]:-}" != -n || "${#argv[@]}" -lt 3 || "${argv[2]}" == -* ]]; then
       DC_REFUSE_REASON="a cleanup step may only use sudo -n COMMAND, so it never asks for a password"
@@ -277,7 +285,7 @@ dc_command_shape_safe() {
       ;;
   esac
   if dc_tool_can_run_anything "$tool"; then
-    DC_REFUSE_REASON="$tool could run anything, so the never-touch list could not be checked"
+    DC_REFUSE_REASON="$tool could run anything or remove any path, so the never-touch list could not be checked"
     return 1
   fi
   case "$tool" in
@@ -305,45 +313,49 @@ dc_command_shape_safe() {
       fi
       ;;
   esac
-  # Cleanup runs from HOME, so even one relative word can name ~/.ssh or ~/code. A
-  # short option takes the rest of its word as its value, so -c.ssh names ~/.ssh too.
-  for ((index = start + 1; index < ${#argv[@]}; index++)); do
-    arg="${argv[$index]}"
-    value="$arg"
-    case "$arg" in
-      *=*) value="${arg#*=}" ;;
-      --*) continue ;;
-      -?*) value="${arg:2}" ;;
-      -*) continue ;;
-    esac
-    [[ -n "$value" ]] || continue
-    if [[ "$value" == "$arg" ]]; then
-      case "$dc_command_words" in
-        *" $value "*) continue ;;
-      esac
-    fi
-    if dc_path_protected "$value"; then
-      DC_REFUSE_REASON="$value: $DC_PROTECT_REASON"
-      return 1
-    fi
-  done
   return 0
 }
 
 dc_exact_commands=""
 dc_prefix_commands=""
 
-dc_join_argv() { # sets dc_joined, with a separator no argument can hold by accident
+dc_join_argv() { # sets dc_joined; dc_command_shape_safe keeps the separator out of arguments
   local IFS=$'\037'
   dc_joined="$*"
 }
 
+# A word in a declaration that names a path has to pass the never-touch check. Other
+# words are subcommands, flags, and values such as until=168h or the cluster -Sc, and
+# a person reviews them where the steps file names them.
+dc_declared_word_safe() { # word
+  local value="$1"
+  case "$value" in
+    *=*) value="${value#*=}" ;;
+    --*) return 0 ;;
+    -?*) value="${value:2}" ;;
+    -*) return 0 ;;
+  esac
+  case "$value" in
+    */* | "~"* | .*) ;;
+    *) return 0 ;;
+  esac
+  if dc_path_protected "$value"; then
+    DC_REFUSE_REASON="$value: $DC_PROTECT_REASON"
+    return 1
+  fi
+}
+
 dc_declare_command() { # exact|prefix argv...
-  local kind="$1"
+  local kind="$1" word
   shift
   if ! dc_command_shape_safe "$@"; then
     dc_invalid_steps "$(dc_quote_argv "$@") cannot be a cleanup command: $DC_REFUSE_REASON."
   fi
+  for word in "$@"; do
+    if ! dc_declared_word_safe "$word"; then
+      dc_invalid_steps "$(dc_quote_argv "$@") cannot be a cleanup command: $DC_REFUSE_REASON."
+    fi
+  done
   dc_join_argv "$@"
   if [[ "$kind" == exact ]]; then
     dc_exact_commands="$dc_exact_commands$dc_joined"$'\n'
@@ -358,14 +370,34 @@ dc_allow_command() { # argv...
   dc_declare_command exact "$@"
 }
 
-# The same, where later arguments vary. Each later argument still has to pass the
-# never-touch check.
+# The same, where later arguments vary. Every later argument is checked when it runs.
 dc_allow_command_prefix() { # argv...
   dc_declare_command prefix "$@"
 }
 
+# Cleanup runs from HOME, so even one relative word can name ~/.ssh or ~/code, and a
+# short option takes the rest of its word as its value, so -c.ssh does too.
+dc_operand_safe() { # argument
+  local value="$1"
+  case "$value" in
+    *=*) value="${value#*=}" ;;
+    --*) return 0 ;;
+    -?*) value="${value:2}" ;;
+    -*) return 0 ;;
+  esac
+  [[ -n "$value" ]] || return 0
+  if dc_path_protected "$value"; then
+    DC_REFUSE_REASON="$value: $DC_PROTECT_REASON"
+    return 1
+  fi
+}
+
+# Returns 0 when argv is an exact form, or a prefix form whose later arguments all pass
+# the never-touch check. Otherwise sets DC_REFUSE_REASON.
 dc_command_declared() {
-  local line
+  local line prefix_words=0 index
+  local -a argv
+  argv=("$@")
   dc_join_argv "$@"
   case $'\n'"$dc_exact_commands" in
     *$'\n'"$dc_joined"$'\n'*) return 0 ;;
@@ -373,19 +405,24 @@ dc_command_declared() {
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     case "$dc_joined"$'\037' in
-      "$line"$'\037'*) return 0 ;;
+      "$line"$'\037'*)
+        prefix_words="$(printf '%s' "$line" | LC_ALL=C tr -cd '\037' | wc -c | tr -d ' ')"
+        prefix_words=$((prefix_words + 1))
+        for ((index = prefix_words; index < ${#argv[@]}; index++)); do
+          dc_operand_safe "${argv[$index]}" || return 1
+        done
+        return 0
+        ;;
     esac
   done <<<"$dc_prefix_commands"
+  DC_REFUSE_REASON="the helper and the steps file do not name this exact command"
   return 1
 }
 
 # Returns 0 when a cleanup command may run; otherwise sets DC_REFUSE_REASON.
 dc_command_allowed() {
   dc_command_shape_safe "$@" || return 1
-  if ! dc_command_declared "$@"; then
-    DC_REFUSE_REASON="the helper and the steps file do not name this exact command"
-    return 1
-  fi
+  dc_command_declared "$@"
 }
 
 cmd_never_touch() {
@@ -740,7 +777,7 @@ cmd_test_lanes() {
   dc_refresh_lanes
   if [[ "$dc_lanes_active" -eq 0 ]]; then
     echo "No test processes are running."
-    return 1
+    return 10
   fi
   printf '%s\n' "$dc_lane_summary"
   [[ "$dc_lanes_unknown" -eq 0 ]] || return 2
@@ -1293,7 +1330,9 @@ main() {
   dc_load_policy
   # shellcheck source=shared-steps.sh
   . "$dc_root/shared-steps.sh"
-  dc_declare_shared_commands
+  case "$subcommand" in
+    run | check-command) dc_declare_shared_commands ;;
+  esac
   case "$subcommand" in
     run) cmd_run ;;
     never-touch) cmd_never_touch ;;
