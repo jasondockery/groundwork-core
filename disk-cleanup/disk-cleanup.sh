@@ -16,7 +16,8 @@ Usage:
                                                 print only the disk report
   disk-cleanup.sh never-touch                   print the never-touch list
   disk-cleanup.sh check-path PATH...            exit 1 when a path is on the list
-  disk-cleanup.sh check-command -- ARG...       exit 1 when a command would be refused
+  disk-cleanup.sh check-command [--steps FILE] -- ARG...
+                                                exit 1 when a command would be refused
   disk-cleanup.sh test-lanes                    list running test processes; exit 0
                                                 when any run, 1 when none, 2 when unknown
   disk-cleanup.sh test-lanes --classify         read command lines on stdin and print
@@ -234,25 +235,25 @@ dc_path_protected() {
 }
 
 # A wrapper or interpreter could run anything, so what it would touch cannot be
-# checked. These can never be cleanup tools, even if a steps file asks.
-dc_wrapper_tools=" sh bash zsh dash ksh fish env eval exec xargs nohup nice ionice timeout gtimeout command builtin busybox toybox stdbuf setsid doas su sudo python python2 python3 perl ruby node awk gawk sed "
-# Fail closed: only the tools a cleanup step is known to need may run.
-dc_allowed_tools=" docker npm pnpm apt-get paccache yay xcrun brew rm "
-# Words these tools take that are not paths, so a folder named ~/cache or ~/image
-# does not stop a command. An rm argument is always a path.
-dc_command_words=" builder image prune cache clean simctl delete unavailable runtime store "
-
-# A steps file names any other tool it runs, so the list stays visible in review.
-dc_allow_tool() { # name
-  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || dc_invalid_steps "bad tool name: $1."
-  case "$dc_wrapper_tools" in
-    *" $1 "*) dc_invalid_steps "$1 could run anything, so it cannot be a cleanup tool." ;;
+# checked. These can never be cleanup tools, even if a steps file names one.
+dc_tool_can_run_anything() { # tool
+  case "$1" in
+    *sh | *sh[0-9]* | env | eval | exec | xargs | nohup | nice | ionice | renice | timeout | gtimeout | command | builtin | \
+      busybox | toybox | stdbuf | setsid | doas | su | sudo | chroot | script | parallel | watch | find | git | make | \
+      mise | npx | pnpx | bunx | bun | deno | osascript | open | python* | pypy* | perl* | ruby* | node* | php* | lua* | \
+      tclsh* | awk | gawk | mawk | nawk | sed | gsed)
+      return 0
+      ;;
   esac
-  dc_allowed_tools="$dc_allowed_tools$1 "
+  return 1
 }
 
-# Returns 0 when a cleanup command may run; otherwise sets DC_REFUSE_REASON.
-dc_command_allowed() {
+# Words these commands take that are not paths, so a folder named ~/cache or ~/image
+# does not stop a command.
+dc_command_words=" builder image prune cache clean simctl delete unavailable runtime store "
+
+# Everything a command must satisfy whoever names it. Sets DC_REFUSE_REASON.
+dc_command_shape_safe() {
   local start=0 tool arg value index
   local -a argv
   argv=("$@")
@@ -275,19 +276,10 @@ dc_command_allowed() {
       return 1
       ;;
   esac
-  case "$dc_wrapper_tools" in
-    *" $tool "*)
-      DC_REFUSE_REASON="$tool could run anything, so the never-touch list could not be checked"
-      return 1
-      ;;
-  esac
-  case "$dc_allowed_tools" in
-    *" $tool "*) ;;
-    *)
-      DC_REFUSE_REASON="$tool is not a known cleanup tool"
-      return 1
-      ;;
-  esac
+  if dc_tool_can_run_anything "$tool"; then
+    DC_REFUSE_REASON="$tool could run anything, so the never-touch list could not be checked"
+    return 1
+  fi
   case "$tool" in
     docker)
       for arg in "${argv[@]}"; do
@@ -313,18 +305,19 @@ dc_command_allowed() {
       fi
       ;;
   esac
-  # Cleanup runs from HOME, so even one relative word can name ~/.ssh or ~/code.
+  # Cleanup runs from HOME, so even one relative word can name ~/.ssh or ~/code. A
+  # short option takes the rest of its word as its value, so -c.ssh names ~/.ssh too.
   for ((index = start + 1; index < ${#argv[@]}; index++)); do
     arg="${argv[$index]}"
     value="$arg"
     case "$arg" in
       *=*) value="${arg#*=}" ;;
       --*) continue ;;
-      -?*/*) value="${arg:2}" ;;
+      -?*) value="${arg:2}" ;;
       -*) continue ;;
     esac
     [[ -n "$value" ]] || continue
-    if [[ "$tool" != rm && "$value" == "$arg" ]]; then
+    if [[ "$value" == "$arg" ]]; then
       case "$dc_command_words" in
         *" $value "*) continue ;;
       esac
@@ -335,6 +328,64 @@ dc_command_allowed() {
     fi
   done
   return 0
+}
+
+dc_exact_commands=""
+dc_prefix_commands=""
+
+dc_join_argv() { # sets dc_joined, with a separator no argument can hold by accident
+  local IFS=$'\037'
+  dc_joined="$*"
+}
+
+dc_declare_command() { # exact|prefix argv...
+  local kind="$1"
+  shift
+  if ! dc_command_shape_safe "$@"; then
+    dc_invalid_steps "$(dc_quote_argv "$@") cannot be a cleanup command: $DC_REFUSE_REASON."
+  fi
+  dc_join_argv "$@"
+  if [[ "$kind" == exact ]]; then
+    dc_exact_commands="$dc_exact_commands$dc_joined"$'\n'
+  else
+    dc_prefix_commands="$dc_prefix_commands$dc_joined"$'\n'
+  fi
+}
+
+# Fail closed: a command runs only when the helper or a steps file names it exactly,
+# so the whole list stays visible in review.
+dc_allow_command() { # argv...
+  dc_declare_command exact "$@"
+}
+
+# The same, where later arguments vary. Each later argument still has to pass the
+# never-touch check.
+dc_allow_command_prefix() { # argv...
+  dc_declare_command prefix "$@"
+}
+
+dc_command_declared() {
+  local line
+  dc_join_argv "$@"
+  case $'\n'"$dc_exact_commands" in
+    *$'\n'"$dc_joined"$'\n'*) return 0 ;;
+  esac
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$dc_joined"$'\037' in
+      "$line"$'\037'*) return 0 ;;
+    esac
+  done <<<"$dc_prefix_commands"
+  return 1
+}
+
+# Returns 0 when a cleanup command may run; otherwise sets DC_REFUSE_REASON.
+dc_command_allowed() {
+  dc_command_shape_safe "$@" || return 1
+  if ! dc_command_declared "$@"; then
+    DC_REFUSE_REASON="the helper and the steps file do not name this exact command"
+    return 1
+  fi
 }
 
 cmd_never_touch() {
@@ -363,6 +414,12 @@ cmd_check_path() {
 }
 
 cmd_check_command() {
+  if [[ "${1:-}" == --steps ]]; then
+    [[ "$#" -ge 2 ]] || die_usage "--steps needs a file."
+    dc_steps_file="$2"
+    shift 2
+    dc_load_steps
+  fi
   [[ "${1:-}" == "--" ]] || die_usage "check-command needs -- before the command."
   shift
   [[ "$#" -gt 0 ]] || die_usage "check-command needs a command after --."
@@ -1236,6 +1293,7 @@ main() {
   dc_load_policy
   # shellcheck source=shared-steps.sh
   . "$dc_root/shared-steps.sh"
+  dc_declare_shared_commands
   case "$subcommand" in
     run) cmd_run ;;
     never-touch) cmd_never_touch ;;

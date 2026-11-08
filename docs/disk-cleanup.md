@@ -6,7 +6,7 @@ One contract for every Groundwork environment: regular cleanup keeps a machine's
 
 | Level | What it means | Steps |
 |---|---|---|
-| Automatic | Runs without asking. Removes only what its tool can rebuild, so nothing is lost. | Package-manager caches, `npm cache clean --force` over 3 GiB, `docker builder prune` for cache unused for over 168 hours (a week), and platform steps such as `xcrun simctl delete unavailable` |
+| Automatic | Runs without asking. Removes only what its tool can rebuild, so nothing is lost. | Package-manager caches, `npm cache clean --force` over 3 GiB, pinned to the cache path it checked, `docker builder prune` for cache unused for over 168 hours (a week), and platform steps such as `xcrun simctl delete unavailable` |
 | Ask first | Shows the size, defaults to no, and needs a terminal. | `docker image prune --all`, simulator runtimes older than the newest per platform, and emptying the Trash |
 | Report only | Reads and prints. | Free space, the 10 biggest folders under `~` and `~/code`, and extra paths such as iPhone backups |
 
@@ -23,9 +23,9 @@ Cleanup never deletes, moves, or prunes these, or anything inside them:
 - `~/.t3`, `~/.aws`, `~/.ssh`, and `~/.config/gh`
 - Docker volumes: never `docker volume prune` or `docker system prune --volumes`, and never the VM or data folder that holds them (`~/.colima`, `~/.lima`, Docker Desktop's container, `/var/lib/docker`)
 - Any pnpm store: only `pnpm store prune` may change one
-- The contents of any repo checkout or its `.git`, including `~/code`. A folder in the Trash that holds a Git checkout at any depth stays there, as does one that could not be fully searched, and the run says so.
+- The contents of any repo checkout or its `.git`, including `~/code`. A folder in the Trash that holds a Git checkout at any depth stays there, as does one that could not be fully searched, and the run says so. The Trash is emptied from inside the folder that was checked, so a path swapped for a symlink afterwards cannot redirect it.
 
-The helper screens every cleanup command against this list before running it. A folder that contains a listed path is refused too, and a symlink cannot hide one. Every argument counts, including a relative one, because cleanup runs from the home folder. Only known cleanup tools may run, and a steps file names any other tool it needs. A shell, an interpreter, or a wrapper such as `env`, `nice`, or `timeout` can never be one, because what it would run cannot be checked. `sudo` is allowed only as `sudo -n COMMAND`, so a step never asks for a password; without active permission, a step that needs it skips and prints the command.
+The helper screens every cleanup command against this list before running it. A folder that contains a listed path is refused too, and a symlink cannot hide one. Every argument counts, including a relative one, because cleanup runs from the home folder. A command runs only when the helper or a steps file names it exactly, so any other subcommand of the same tool is refused. A shell, an interpreter, or a wrapper such as `env`, `nice`, or `timeout` can never be named, because what it would run cannot be checked. `sudo` is allowed only as `sudo -n COMMAND`, so a step never asks for a password; without active permission, a step that needs it skips and prints the command.
 
 A pnpm store is recognized by its usual paths, by its shape (a `v<major>` folder holding `files`), and by `pnpm store path`, which runs with downloads turned off. When pnpm is installed and that query fails, the run says so.
 
@@ -37,7 +37,7 @@ Docker and tool-cache steps stand down, and say why, while a test process runs: 
 
 ## Docker
 
-Cleanup never starts Docker. It acts only on a verified local endpoint and the daemon's own builder, and it refuses a set `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, or `BUILDX_BUILDER`, because `docker builder prune` acts on the selected builder, which can be remote.
+Cleanup never starts Docker. It acts only on a verified local endpoint and the daemon's own builder, checked again immediately before each prune, and it refuses a set `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, or `BUILDX_BUILDER`, because `docker builder prune` acts on the selected builder, which can be remote.
 
 ## Dry run
 

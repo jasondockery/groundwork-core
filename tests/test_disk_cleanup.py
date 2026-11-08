@@ -155,6 +155,9 @@ class Fixture(unittest.TestCase):
     def commands(self):
         return self.log.read_text().splitlines()
 
+    def npm_clean(self):
+        return f"npm cache clean --force --cache {self.home}/.npm"
+
     def assert_no_mutation(self):
         for line in self.commands():
             for word in MUTATING:
@@ -330,23 +333,34 @@ class NeverTouchTest(Fixture):
             ["docker", "system", "prune", "--volumes"],
             ["docker", "system", "prune", "-a"],
             ["docker", "image", "prune", "--volumes"],
+            ["docker", "builder", "prune", "--volumes=true"],
+            ["docker", "builder", "prune"],
+            ["docker", "image", "prune", "--all", "--force", "--filter", "label=x"],
             ["docker", "rmi", "x"],
+            ["/usr/bin/docker", "builder", "prune", "--all", "--force", "--filter", "until=168h"],
             ["pnpm", "store", "path"],
             ["pnpm", "store", "prune", "--force"],
+            ["pnpm", "install"],
             ["rm", "-rf", "~/.ssh"],
             ["rm", "-rf", ".ssh"],
             ["rm", "-rf", f"{self.home}/.aws"],
             ["rm", "-rf", f"{self.home}/project/src"],
             ["find", f"{self.home}/code", "-delete"],
             ["unknown-tool", "x"],
-            ["/usr/bin/docker", "builder", "prune"],
             ["brew", f"--path={self.home}/.ssh"],
+            ["brew", "ruby", "-e", "FileUtils.rm_rf(File.expand_path('~/.ssh'))"],
+            ["npm", "exec", "--", "bash", "-c", "rm -rf ~/.ssh"],
+            ["npm", "run", "anything"],
+            ["npm", "cache", "clean"],
             ["npm", "cache", "clean", "--force", "--cache=.ssh"],
             ["npm", "cache", "clean", "--force", "--cache=code"],
             ["npm", "cache", "clean", "--force", "--cache", ".aws"],
+            ["xcrun", "python3", "-c", "print(1)"],
+            ["xcrun", "simctl", "spawn", "booted", "rm"],
             ["paccache", "-r", "-c", ".ssh"],
             ["paccache", f"-c{self.home}/.ssh"],
-            ["docker", "builder", "prune", "--volumes=true"],
+            ["paccache", "-c.ssh"],
+            ["paccache", "-ccode"],
             ["bash", "-c", "rm -rf ~/.ssh"],
             ["env", "rm", "-rf", "x"],
             ["nice", "rm", "-rf", ".ssh"],
@@ -355,6 +369,7 @@ class NeverTouchTest(Fixture):
             ["command", "rm", "-rf", ".ssh"],
             ["busybox", "rm", "-rf", ".ssh"],
             ["python3", "-c", "x"],
+            ["python3.12", "-c", "x"],
             ["sudo", "paccache", "-r"],
             ["sudo", "-n", "rm", "-rf", "/"],
             ["sudo", "-n", "docker", "volume", "prune"],
@@ -375,15 +390,64 @@ class NeverTouchTest(Fixture):
             ["docker", "image", "prune", "--all", "--force"],
             ["pnpm", "store", "prune"],
             ["npm", "cache", "clean", "--force"],
-            ["sudo", "-n", "paccache", "-ruk1"],
-            ["sudo", "-n", "apt-get", "clean"],
-            ["rm", "-f", f"{self.home}/.npm/old"],
-            ["xcrun", "simctl", "delete", "unavailable"],
-            ["xcrun", "simctl", "runtime", "delete", "ABC-123"],
-            ["yay", "-Sc", "--aur", "--noconfirm"],
+            ["npm", "cache", "clean", "--force", "--cache", f"{self.home}/.npm"],
         )
         for argv in allowed:
             self.assertEqual(self.run_script("check-command", "--", *argv).returncode, 0, argv)
+
+    def test_a_steps_file_names_exact_commands(self):
+        self.steps.write_text(textwrap.dedent("""\
+            dc_adapter_steps() {
+              dc_allow_command sudo -n apt-get clean
+              dc_allow_command yay -Sc --aur --noconfirm
+              dc_allow_command xcrun simctl delete unavailable
+              dc_allow_command_prefix xcrun simctl runtime delete
+              dc_allow_command_prefix paccache -r
+            }
+            """))
+        def check(*argv):
+            return self.run_script("check-command", "--steps", str(self.steps), "--", *argv).returncode
+        for argv in (
+            ["sudo", "-n", "apt-get", "clean"],
+            ["yay", "-Sc", "--aur", "--noconfirm"],
+            ["xcrun", "simctl", "delete", "unavailable"],
+            ["xcrun", "simctl", "runtime", "delete", "ABC-123"],
+            ["paccache", "-r", "-k1"],
+        ):
+            self.assertEqual(check(*argv), 0, argv)
+        for argv in (
+            ["apt-get", "clean"],
+            ["sudo", "-n", "apt-get", "autoremove"],
+            ["yay", "-Sc"],
+            ["yay", "-Sc", "--aur", "--noconfirm", "--extra"],
+            ["xcrun", "simctl", "delete", "all"],
+            ["xcrun", "simctl", "runtime", "delete", ".ssh"],
+            ["paccache", "-r", "-c.ssh"],
+            ["paccache", "-r", "-ccode"],
+            ["paccache", "-r", "-c", "code"],
+            ["paccache", "-rk1"],
+        ):
+            self.assertEqual(check(*argv), 1, argv)
+
+    def test_a_steps_file_cannot_name_a_wrapper_or_a_protected_path(self):
+        for declaration in (
+            "dc_allow_command env rm -rf x",
+            "dc_allow_command_prefix nice",
+            "dc_allow_command python3.12 -c x",
+            "dc_allow_command_prefix bash",
+            "dc_allow_command rm -rf .ssh",
+            'dc_allow_command rm -rf "$HOME/code"',
+            "dc_allow_command docker volume prune",
+            "dc_allow_command docker system prune",
+            "dc_allow_command pnpm store path",
+            "dc_allow_command sudo apt-get clean",
+            "dc_allow_command",
+        ):
+            self.steps.write_text(f"dc_adapter_steps() {{ {declaration}; }}\n")
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, declaration)
+            self.assertIn("Nothing was changed", result.stderr, declaration)
+        self.assertEqual(self.commands(), [])
 
     def test_a_refusal_says_why(self):
         for argv, reason in (
@@ -393,7 +457,8 @@ class NeverTouchTest(Fixture):
             (["sudo", "paccache", "-r"], "sudo -n COMMAND"),
             (["sudo", "-n", "-E", "paccache", "-r"], "sudo -n COMMAND"),
             (["sudo", "-n", "--", "paccache", "-r"], "sudo -n COMMAND"),
-            (["unknown-tool"], "not a known cleanup tool"),
+            (["unknown-tool"], "do not name this exact command"),
+            (["npm", "exec", "--", "ls"], "do not name this exact command"),
             (["/usr/bin/docker", "image", "prune"], "without a path"),
         ):
             self.assertIn(reason, self.run_script("check-command", "--", *argv).stdout, argv)
@@ -401,20 +466,11 @@ class NeverTouchTest(Fixture):
     def test_a_folder_named_like_a_subcommand_does_not_stop_a_command(self):
         (self.home / "builder/.git").mkdir(parents=True)
         (self.home / "cache/.git").mkdir(parents=True)
-        self.assertEqual(self.run_script("check-command", "--", "docker", "builder", "prune").returncode, 0)
+        self.assertEqual(self.run_script("check-command", "--", "docker", "builder", "prune", "--all", "--force",
+                                         "--filter", "until=168h").returncode, 0)
         self.assertEqual(self.run_script("check-command", "--", "npm", "cache", "clean", "--force").returncode, 0)
         # An rm argument is always a path.
         self.assertEqual(self.run_script("check-command", "--", "rm", "-rf", "cache").returncode, 1)
-
-    def test_a_steps_file_can_name_a_tool_but_never_a_wrapper(self):
-        for wrapper in ("env", "nice", "timeout", "bash", "python3", "busybox", "sudo"):
-            self.steps.write_text(f'dc_adapter_steps() {{ dc_allow_tool {wrapper}; }}\n')
-            result = self.run_steps()
-            self.assertEqual(result.returncode, 1, wrapper)
-            self.assertIn("could run anything", result.stderr, wrapper)
-        self.steps.write_text('dc_adapter_steps() { dc_allow_tool "bad name"; }\n')
-        self.assertEqual(self.run_steps().returncode, 1)
-        self.assertEqual(self.commands(), [])
 
     def test_a_pnpm_store_anywhere_is_recognized_by_its_shape(self):
         (self.home / "custom-store/v10/files").mkdir(parents=True)
@@ -433,7 +489,7 @@ class NeverTouchTest(Fixture):
         result = self.run_steps()
         self.assertIn("pnpm store path net=0 offline=1", self.commands())
         self.assertIn("in the pnpm store", result.stdout)
-        self.assertNotIn("npm cache clean --force", self.commands())
+        self.assertFalse([c for c in self.commands() if "cache clean" in c])
 
     def test_a_failed_pnpm_query_is_said_and_never_called_clean(self):
         for body in ("exit 1\n", "echo not-absolute\n", "printf '/x\\033y\\n'\n"):
@@ -447,7 +503,7 @@ class NeverTouchTest(Fixture):
         self.write_tool("logged", '#!/bin/bash\nprintf "logged %s\\n" "$*" >>"$FAKE_LOG"\n')
         self.steps.write_text(textwrap.dedent("""\
             dc_adapter_steps() {
-              dc_allow_tool logged
+              dc_allow_command_prefix logged
               dc_step auto any wipe-volumes "Volumes"
               dc_step auto any wipe-ssh "SSH"
               dc_step auto any harmless "Harmless"
@@ -518,7 +574,7 @@ class TestLaneTest(Fixture):
         self.fake_ps("  20 pnpm test\n")
         self.write_tool("logged", '#!/bin/bash\nprintf "logged %s\\n" "$*" >>"$FAKE_LOG"\n')
         self.steps.write_text(textwrap.dedent("""\
-            dc_adapter_steps() { dc_allow_tool logged; dc_step auto any unrelated "Unrelated"; }
+            dc_adapter_steps() { dc_allow_command logged go; dc_step auto any unrelated "Unrelated"; }
             dc_plan_unrelated() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
             dc_act_unrelated() { dc_mutate u logged go; }
             """))
@@ -570,7 +626,7 @@ class TestLaneTest(Fixture):
             '"cache clean") printf "  20 pnpm test\\n" >"$FAKE_STATE/ps-listing" ;;',
         ))
         result = self.run_steps()
-        self.assertIn("npm cache clean --force", "\n".join(self.commands()))
+        self.assertIn(self.npm_clean(), self.commands())
         self.assertIn("Docker build cache: skipped because", result.stdout)
         self.assertEqual([c for c in self.commands() if "prune" in c], [])
 
@@ -580,7 +636,7 @@ class DryRunTest(Fixture):
         result = self.run_steps("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("dry run: nothing is changed", result.stdout)
-        self.assertIn("Would run: npm cache clean --force", result.stdout)
+        self.assertIn(f"Would run: {self.npm_clean()}", result.stdout)
         self.assertIn("Would run: docker builder prune --all --force --filter until=168h", result.stdout)
         self.assertIn("Would ask, then run: docker image prune --all --force", result.stdout)
         self.assertRegex(result.stdout, r"Trash: 1 item\(s\), \d+ KiB\.")
@@ -613,7 +669,7 @@ class AutomaticTest(Fixture):
         result = self.run_steps()
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = self.commands()
-        self.assertIn("npm cache clean --force", commands)
+        self.assertIn(self.npm_clean(), commands)
         self.assertIn("docker builder prune --all --force --filter until=168h", commands)
         self.assertNotIn("docker image prune --all --force", commands)
         self.assertFalse(any("volume" in c for c in commands))
@@ -632,17 +688,40 @@ class AutomaticTest(Fixture):
                        capture_output=True, stdin=subprocess.DEVNULL)
         self.assertIn(f"npm-from {self.home}", self.commands())
 
+    def test_a_config_changed_after_the_plan_cannot_redirect_the_clean(self):
+        (self.home / ".ssh").mkdir()
+        (self.home / ".ssh/id").write_text("key\n")
+        real_du = shutil.which("du", path="/bin:/usr/bin")
+        self.write_tool("du", (
+            f'#!/bin/bash\nprintf "%s\\n" "$HOME/.ssh" >"$FAKE_STATE/npm-cache-path"\nexec {real_du} "$@"\n'
+        ))
+        self.write_tool("npm", r"""#!/bin/bash
+printf 'npm %s\n' "$*" >>"$FAKE_LOG"
+case "$1 ${2:-}" in
+  "config get") cat "$FAKE_STATE/npm-cache-path" ;;
+  "cache clean")
+    target="$(cat "$FAKE_STATE/npm-cache-path")"
+    while (($#)); do [[ "$1" != --cache ]] || target="$2"; shift; done
+    rm -rf "$target"
+    ;;
+esac
+""")
+        self.run_steps()
+        self.assertIn(self.npm_clean(), self.commands())
+        self.assertEqual((self.home / ".ssh/id").read_text(), "key\n")
+        self.assertFalse((self.home / ".npm").exists())
+
     def test_npm_cache_under_the_limit_stays(self):
         self.fill(self.home / ".npm/_cacache/blob", 100)
         result = self.run_steps()
         self.assertIn("npm cache: nothing to clear", result.stdout)
-        self.assertNotIn("npm cache clean --force", self.commands())
+        self.assertFalse([c for c in self.commands() if "cache clean" in c])
 
     def test_npm_cache_at_a_protected_path_is_not_cleaned(self):
         (self.state / "npm-cache-path").write_text(f"{self.home}/.ssh/npm\n")
         result = self.run_steps()
         self.assertIn("protected path", result.stdout)
-        self.assertNotIn("npm cache clean --force", self.commands())
+        self.assertFalse([c for c in self.commands() if "cache clean" in c])
 
     def test_a_missing_tool_is_reported_not_an_error(self):
         (self.bin / "docker").unlink()
@@ -710,6 +789,36 @@ class DockerGuardTest(Fixture):
         for host in ("tcp://example.invalid:2375\n", "ssh://me@example.invalid\n", "\n"):
             self.docker_state(host=host)
             self.assert_docker_untouched(self.run_steps(), "the Docker endpoint is not local")
+
+    def flip_after_first_read(self, name, before, after):
+        (self.state / "docker" / name).write_text(before)
+        return self.write_tool("docker", FAKE_DOCKER.replace(
+            '"context inspect") cat "$state/host" ;;',
+            f'''"context inspect")
+    cat "$state/host"
+    printf '%s\\n' "{after}" >"$state/host"
+    ;;''',
+        ))
+
+    def test_an_endpoint_that_turns_remote_after_the_plan_stops_the_prune(self):
+        self.flip_after_first_read("host", "unix:///run/docker.sock\n", "tcp://remote.example:2375")
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Docker build cache: not run: the Docker endpoint is not local.", result.stdout)
+        self.assertIn("1 failed step(s): Docker build cache", result.stdout)
+        self.assertEqual([c for c in self.commands() if "prune" in c], [])
+
+    def test_a_builder_that_changes_after_the_plan_stops_the_prune(self):
+        self.write_tool("docker", FAKE_DOCKER.replace(
+            '"buildx inspect") printf \'Name:          default\\nDriver:        %s\\n\' "$(cat "$state/driver")" ;;',
+            '''"buildx inspect")
+    printf 'Name:          default\\nDriver:        %s\\n' "$(cat "$state/driver")"
+    echo docker-container >"$state/driver"
+    ;;''',
+        ))
+        result = self.run_steps()
+        self.assertIn("Docker build cache: not run: the selected buildx builder is not the daemon's own.", result.stdout)
+        self.assertEqual([c for c in self.commands() if "prune" in c], [])
 
     def test_remote_builder_is_refused(self):
         self.docker_state(driver="docker-container\n")
@@ -941,6 +1050,71 @@ class TrashTest(Fixture):
         self.assertIn("Trash/files is a symlink", result.stdout)
         self.assertTrue((self.home / "other/doc").exists())
 
+    def swap_trash_on_second_key(self):
+        """Swap .Trash for a symlink to .ssh after the re-plan's last symlink check."""
+        real = shutil.which("cksum", path="/bin:/usr/bin:/usr/sbin")
+        (self.home / ".ssh").mkdir()
+        self.fill(self.home / ".ssh/old-report.pdf", 16)
+        self.write_tool("cksum", f'''#!/bin/bash
+count=$(cat "$FAKE_STATE/cksums" 2>/dev/null || echo 0)
+echo $((count + 1)) >"$FAKE_STATE/cksums"
+if [[ -f "$FAKE_STATE/swap-now" ]]; then
+  rm -f "$FAKE_STATE/swap-now"
+  /bin/mv "$HOME/.Trash" "$HOME/.Trash.real"
+  /bin/ln -s "$HOME/.ssh" "$HOME/.Trash"
+fi
+exec {real} "$@"
+''')
+
+    def test_a_trash_swapped_for_a_symlink_after_the_check_cannot_redirect_rm(self):
+        self.swap_trash_on_second_key()
+        arm = lambda: (self.state / "swap-now").touch()
+        code, output = self.run_pty(answers=[b"n\n", b"y\n"], before_answer={1: arm})
+        self.assertEqual(code, 1, output)
+        self.assertTrue((self.home / ".ssh/old-report.pdf").exists(), output)
+        self.assertIn("The Trash folder changed after it was checked, so nothing was removed.", output)
+        self.assertNotIn("Trash: cleared", output)
+        self.assertIn("1 failed step(s): Trash", output)
+
+    def test_a_parent_swapped_for_a_symlink_after_the_check_cannot_redirect_rm(self):
+        trash = self.home / ".local/share/Trash"
+        self.fill(trash / "files/old.txt", 4)
+        (trash / "info").mkdir()
+        self.fill(self.home / ".ssh/files/old.txt", 4)
+        self.steps.write_text(STEPS.replace('"$HOME/.Trash"', '"$HOME/.local/share/Trash"') + "DC_TRASH_LAYOUT=freedesktop\n")
+        real = shutil.which("cksum", path="/bin:/usr/bin:/usr/sbin")
+        self.write_tool("cksum", f'''#!/bin/bash
+if [[ -f "$FAKE_STATE/swap-now" ]]; then
+  rm -f "$FAKE_STATE/swap-now"
+  /bin/mv "$HOME/.local/share/Trash" "$HOME/.local/share/Trash.real"
+  /bin/ln -s "$HOME/.ssh" "$HOME/.local/share/Trash"
+fi
+exec {real} "$@"
+''')
+        arm = lambda: (self.state / "swap-now").touch()
+        code, output = self.run_pty(answers=[b"n\n", b"y\n"], before_answer={1: arm})
+        self.assertEqual(code, 1, output)
+        self.assertTrue((self.home / ".ssh/files/old.txt").exists(), output)
+        self.assertIn("The Trash folder changed after it was checked, so nothing was removed.", output)
+
+    def test_an_info_folder_swapped_after_the_check_cannot_redirect_rm(self):
+        trash = self.home / ".local/share/Trash"
+        self.fill(trash / "files/old.txt", 4)
+        (trash / "info").mkdir()
+        (trash / "info/old.txt.trashinfo").write_text("x\n")
+        (self.home / ".ssh").mkdir()
+        (self.home / ".ssh/old.txt.trashinfo").write_text("keep me\n")
+        self.steps.write_text(STEPS.replace('"$HOME/.Trash"', '"$HOME/.local/share/Trash"') + "DC_TRASH_LAYOUT=freedesktop\n")
+        real = shutil.which("rm", path="/bin:/usr/bin")
+        # The worker's rm of the item is the last moment before the info file goes.
+        self.write_tool("rm", (
+            '#!/bin/bash\nif [[ "$*" == *./old.txt ]]; then\n'
+            f'  /bin/mv "$HOME/.local/share/Trash/info" "$HOME/info.real"\n'
+            f'  /bin/ln -s "$HOME/.ssh" "$HOME/.local/share/Trash/info"\nfi\nexec {real} "$@"\n'
+        ))
+        code, output = self.empty_trash()
+        self.assertEqual((self.home / ".ssh/old.txt.trashinfo").read_text(), "keep me\n", output)
+
     def test_a_trash_inside_a_checkout_is_refused(self):
         self.steps.write_text(STEPS.replace('"$HOME/.Trash"', '"$HOME/repo/.Trash"'))
         (self.home / "repo/.git").mkdir(parents=True)
@@ -1134,14 +1308,14 @@ class BoundedTest(Fixture):
         ))
         self.steps.write_text(textwrap.dedent("""\
             dc_adapter_steps() {
-              dc_allow_tool hang
+              dc_allow_command hang
               dc_step auto any stuck "Stuck"
               dc_step auto any after "After"
             }
             dc_plan_stuck() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
             dc_act_stuck() { dc_mutate stuck hang; }
             dc_plan_after() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
-            dc_act_after() { dc_mutate after npm cache clean --force; }
+            dc_act_after() { dc_mutate after npm cache clean --force --cache "$HOME/.npm"; }
             """))
 
     def assert_gone(self):
@@ -1162,7 +1336,7 @@ class BoundedTest(Fixture):
         self.assertLess(time.monotonic() - started, 20)
         self.assertEqual(result.returncode, 1)
         self.assertIn("Stuck: stopped at its time limit", result.stdout)
-        self.assertIn("npm cache clean --force", self.commands())
+        self.assertIn(self.npm_clean(), self.commands())
         self.assert_gone()
 
     def test_interrupting_a_step_stops_its_tree_and_exits_130(self):
@@ -1170,7 +1344,7 @@ class BoundedTest(Fixture):
         pids = self.state / "hang.pids"
         code, output = self.run_pty(interrupt_when=pids.exists)
         self.assertEqual(code, 130, output)
-        self.assertNotIn("npm cache clean --force", self.commands())
+        self.assertFalse([c for c in self.commands() if "cache clean" in c])
         self.assert_gone()
 
     def test_a_slow_query_cannot_hang_the_run(self):
@@ -1184,7 +1358,7 @@ class BoundedTest(Fixture):
     def test_a_process_left_behind_does_not_count_as_success(self):
         self.write_tool("leaky", '#!/bin/bash\nsleep 300 &\necho $! >"$FAKE_STATE/hang.pids"\nexit 0\n')
         self.steps.write_text(textwrap.dedent("""\
-            dc_adapter_steps() { dc_allow_tool leaky; dc_step auto any leaky "Leaky"; }
+            dc_adapter_steps() { dc_allow_command leaky; dc_step auto any leaky "Leaky"; }
             dc_plan_leaky() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
             dc_act_leaky() { dc_mutate leaky leaky; }
             """))
@@ -1220,7 +1394,7 @@ class LockTest(Fixture):
         self.assertEqual(code, 0, output)
         commands = self.commands()
         first_release = commands.index("lock release")
-        self.assertLess(commands.index("npm cache clean --force"), first_release)
+        self.assertLess(commands.index(self.npm_clean()), first_release)
         self.assertLess(first_release, commands.index("docker image prune --all --force"))
         second_acquire = len(commands) - 1 - commands[::-1].index("lock acquire")
         self.assertLess(first_release, second_acquire)

@@ -30,6 +30,11 @@ package manager test	pnpm dlx vitest run
 package manager test	bunx vitest run
 package manager test	corepack pnpm test
 package manager test	node /opt/node/lib/node_modules/corepack/dist/corepack.js pnpm test
+-	/bin/zsh -c /work/app/node_modules/.bin/vitest run
+-	/usr/bin/grep -n /vitest /tmp/x
+-	/usr/bin/vim /Users/me/My Projects/node_modules/.bin/vitest run
+-	/bin/echo /work/node_modules/.bin/jest --ci
+-	/bin/echo /work/node_modules/.bin/playwright test
 -	npm install playwright
 -	npm install vitest
 -	pnpm add -D jest

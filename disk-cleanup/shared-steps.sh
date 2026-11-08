@@ -12,6 +12,14 @@
 # dc_act_<id> changes the machine only through dc_mutate, which screens the
 # command against the never-touch list and bounds it. It may set DC_ACT_TEXT.
 
+dc_declare_shared_commands() {
+  dc_allow_command docker builder prune --all --force --filter "until=$DC_DOCKER_BUILD_CACHE_AGE"
+  dc_allow_command docker image prune --all --force
+  dc_allow_command pnpm store prune
+  # Later arguments pin the cache path the plan checked.
+  dc_allow_command_prefix npm cache clean --force
+}
+
 # ---- Docker --------------------------------------------------------------------
 
 # Returns 0 when Docker is reachable, local, and on its own builder. Otherwise
@@ -102,8 +110,18 @@ dc_plan_docker_build_cache() {
   DC_PLAN_COMMAND="docker builder prune --all --force --filter until=$DC_DOCKER_BUILD_CACHE_AGE"
 }
 
+# The endpoint or builder can change after the plan read it, so check again at the
+# last moment. Returns 77, a refusal, with the reason in DC_ACT_TEXT.
+dc_docker_still_usable() {
+  if ! dc_docker_usable; then
+    DC_ACT_TEXT="not run: $DC_PLAN_TEXT."
+    return 77
+  fi
+}
+
 dc_act_docker_build_cache() {
   local status=0
+  dc_docker_still_usable || return "$?"
   dc_mutate "docker builder prune" docker builder prune --all --force --filter "until=$DC_DOCKER_BUILD_CACHE_AGE" || status=$?
   [[ "$status" -eq 0 ]] || return "$status"
   DC_ACT_TEXT="$(grep -E '^Total' "$dc_output" | tail -n 1 | dc_clean_text | tr '\t' ' ' || true)"
@@ -150,6 +168,7 @@ dc_plan_docker_images() {
 
 dc_act_docker_images() {
   local status=0
+  dc_docker_still_usable || return "$?"
   dc_mutate "docker image prune" docker image prune --all --force || status=$?
   [[ "$status" -eq 0 ]] || return "$status"
   DC_ACT_TEXT="$(grep -E '^Total' "$dc_output" | tail -n 1 | dc_clean_text | tr '\t' ' ' || true)"
@@ -185,6 +204,11 @@ dc_npm_cache_path() {
     DC_PLAN_TEXT="its cache is at a protected path: $DC_PROTECT_REASON"
     return 1
   fi
+  if ! dc_canonicalize "$dc_npm_cache"; then
+    DC_PLAN_TEXT="its cache path could not be resolved safely"
+    return 1
+  fi
+  dc_npm_cache="$dc_canonical"
 }
 
 dc_plan_npm_cache() {
@@ -207,12 +231,13 @@ dc_plan_npm_cache() {
   fi
   DC_PLAN_STATE="ready"
   DC_PLAN_TEXT="$(dc_format_kib "$dc_kib"), over the $(dc_format_kib "$limit_kib") limit."
-  DC_PLAN_COMMAND="npm cache clean --force"
+  DC_PLAN_COMMAND="npm cache clean --force --cache $(dc_quote_argv "$dc_npm_cache")"
 }
 
 dc_act_npm_cache() {
   local before="$dc_kib" status=0 after_status=0
-  dc_mutate "npm cache clean" npm cache clean --force || status=$?
+  # Pinned to the path the plan checked: npm's own answer could change by now.
+  dc_mutate "npm cache clean" npm cache clean --force --cache "$dc_npm_cache" || status=$?
   [[ "$status" -eq 0 ]] || return "$status"
   dc_measure_kib "$dc_npm_cache" || after_status=$?
   if [[ "$after_status" -eq 0 && "$dc_kib" -le "$before" ]]; then
@@ -274,6 +299,19 @@ dc_plan_trash() {
       return 0
     fi
   fi
+  if ! dc_canonicalize "$dc_trash_items"; then
+    DC_PLAN_TEXT="the Trash folder could not be resolved safely"
+    return 0
+  fi
+  dc_trash_items_real="$dc_canonical"
+  dc_trash_info_real=""
+  if [[ "${DC_TRASH_LAYOUT:-plain}" == freedesktop ]]; then
+    if ! dc_canonicalize "$DC_TRASH_DIR/info"; then
+      DC_PLAN_TEXT="the Trash folder could not be resolved safely"
+      return 0
+    fi
+    dc_trash_info_real="$dc_canonical"
+  fi
   dc_trash_list || status=$?
   if [[ "$status" -ne 0 ]]; then
     DC_PLAN_TEXT="it could not be read, which on macOS usually means this terminal lacks Full Disk Access; Finder can still empty it"
@@ -309,19 +347,31 @@ dc_trash_item_holds_checkout() { # item
   [[ "$status" -ne 0 || -n "$found" ]]
 }
 
-# Runs in its own process group under one deadline. A trashed folder holding a
-# Git checkout stays: the never-touch list covers it wherever it sits.
+# Runs in its own process group under one deadline. It works from inside the folder
+# the plan checked, so a path swapped for a symlink since then cannot redirect rm. A
+# trashed folder holding a Git checkout stays: the never-touch list covers it
+# wherever it sits.
 dc_trash_worker() { # list kept-file
   local entry name
+  if [[ -L "$dc_trash_items" ]] || ! cd -P -- "$dc_trash_items" 2>/dev/null \
+    || [[ "$(pwd -P)" != "$dc_trash_items_real" ]]; then
+    echo "    The Trash folder changed after it was checked, so nothing was removed."
+    return 3
+  fi
   while IFS= read -r -d '' entry; do
-    if dc_trash_item_holds_checkout "$entry"; then
-      printf '%s\n' "${entry##*/}" >>"$2"
+    name="${entry##*/}"
+    [[ -n "$name" && "$entry" == "$dc_trash_items/$name" ]] || continue
+    if dc_trash_item_holds_checkout "./$name"; then
+      printf '%s\n' "$name" >>"$2"
       continue
     fi
-    rm -rf -- "$entry" || continue
-    if [[ "${DC_TRASH_LAYOUT:-plain}" == freedesktop && ! -L "$DC_TRASH_DIR/info" ]]; then
-      name="${entry##*/}"
-      rm -f -- "$DC_TRASH_DIR/info/$name.trashinfo" || true
+    rm -rf -- "./$name" || continue
+    if [[ -n "$dc_trash_info_real" ]]; then
+      (
+        cd -P -- "$DC_TRASH_DIR/info" 2>/dev/null \
+          && [[ "$(pwd -P)" == "$dc_trash_info_real" ]] \
+          && rm -f -- "./$name.trashinfo"
+      ) || true
     fi
   done <"$1"
 }
