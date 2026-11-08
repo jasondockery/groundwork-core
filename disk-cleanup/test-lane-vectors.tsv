@@ -1,0 +1,33 @@
+# expected label (or - for no match)<TAB>command line. Shapes come from real test runs.
+vitest	vitest run
+vitest	/work/app/node_modules/.bin/vitest run --reporter=dot
+vitest	node /work/app/node_modules/vitest/vitest.mjs run test/a.test.ts
+vitest	/opt/node/bin/node --experimental-import-meta-resolve --require /store/vitest/suppress-warnings.cjs --conditions node /store/node_modules/vitest/dist/workers/forks.js
+jest	jest --ci
+jest	node /work/app/node_modules/.bin/jest --runInBand
+playwright	playwright test
+playwright	node /work/app/node_modules/.bin/playwright test --project=chromium
+playwright	/opt/node/bin/node /work/app/node_modules/@playwright/test/cli.js test
+playwright	node /store/node_modules/playwright/lib/common/process.js
+package manager test	pnpm test
+package manager test	pnpm run test:unit
+package manager test	pnpm --filter web test
+package manager test	/store/pnpm/12.17.0/pnpm-native --silent --dir infra exec vitest run test/a.test.ts
+package manager test	node /opt/node/bin/pnpm --silent --dir infra exec vitest run test/a.test.ts
+package manager test	npm run test
+package manager test	npm test
+package manager test	npx playwright test
+package manager test	yarn test
+package manager test	node /opt/node/lib/node_modules/npm/bin/npm-cli.js test
+-	pnpm install
+-	pnpm run build
+-	npm cache verify
+-	node server.js
+-	node /work/app/node_modules/@playwright/mcp/cli.js --headless
+-	/bin/zsh -c pnpm test
+-	/bin/bash -c vitest run
+-	grep vitest run
+-	vim test/vitest.config.ts
+-	claude -p run vitest and playwright test
+-	node /opt/claude/cli.js -p please run pnpm test
+-	tail -f vitest.log

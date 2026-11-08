@@ -1,0 +1,16 @@
+# How disk cleanup recognizes a running test process. Format: label<TAB>ERE.
+# Each pattern is checked against one command line with a space appended, so a
+# trailing [ ] means "end of word". Patterns start at the executable, so a shell
+# or an agent whose arguments merely mention a test runner does not match; the real
+# runner it starts does. Vectors: test-lane-vectors.tsv.
+vitest	^([^ ]*/)?vitest[ ]
+vitest	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*/vitest(\.mjs)?[ ]
+vitest	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*/vitest/dist/[^ ]*[ ]
+jest	^([^ ]*/)?jest[ ]
+jest	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*/jest(\.js)?[ ]
+playwright	^([^ ]*/)?playwright test[ ]
+playwright	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*/playwright(\.js|\.mjs)? test[ ]
+playwright	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*playwright[^ ]*/cli\.js test[ ]
+playwright	^([^ ]*/)?(node|bun)( [^ ]+)* [^ ]*playwright[^ ]*/lib/(worker|common/process|runner)[^ ]*[ ]
+package manager test	^([^ ]*/)?(pnpm|pnpm-native|pnpx|npm|npx|yarn|bun)( [^ ]+)* (test|test:[^ ]+|vitest|jest|playwright)[ ]
+package manager test	^([^ ]*/)?node( [^ ]+)* [^ ]*/(pnpm|pnpm\.cjs|pnpm\.mjs|npm|npm-cli\.js|npx|npx-cli\.js|yarn|yarn\.js)( [^ ]+)* (test|test:[^ ]+|vitest|jest|playwright)[ ]
