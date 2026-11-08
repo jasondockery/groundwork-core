@@ -201,12 +201,31 @@ dc_path_protected() {
       return 0
       ;;
   esac
+  if [[ -n "${dc_pnpm_store:-}" ]]; then
+    case "$canonical/" in
+      "$dc_pnpm_store/"*)
+        DC_PROTECT_REASON="it is in the pnpm store, which only pnpm store prune may change"
+        return 0
+        ;;
+    esac
+    case "$dc_pnpm_store/" in
+      "$canonical/"*)
+        DC_PROTECT_REASON="it contains the pnpm store, which only pnpm store prune may change"
+        return 0
+        ;;
+    esac
+  fi
   # Any folder holding .git is a checkout. A dotfiles repo at HOME itself does
-  # not make everything under HOME a checkout, so the walk stops there.
+  # not make everything under HOME a checkout, so the walk stops there. A store
+  # generation is a v<major> folder holding files/, wherever it was configured.
   dir="$canonical"
   while [[ "$dir" != "/" && "$dir" != "$home_canonical" && -n "$dir" ]]; do
     if [[ -e "$dir/.git" ]]; then
       DC_PROTECT_REASON="it is inside the repo checkout at $dir"
+      return 0
+    fi
+    if [[ "${dir##*/}" =~ ^v[0-9]+$ && -d "$dir/files" ]]; then
+      DC_PROTECT_REASON="it is in a pnpm store, which only pnpm store prune may change"
       return 0
     fi
     dir="${dir%/*}"
@@ -214,9 +233,27 @@ dc_path_protected() {
   return 1
 }
 
+# A wrapper or interpreter could run anything, so what it would touch cannot be
+# checked. These can never be cleanup tools, even if a steps file asks.
+dc_wrapper_tools=" sh bash zsh dash ksh fish env eval exec xargs nohup nice ionice timeout gtimeout command builtin busybox toybox stdbuf setsid doas su sudo python python2 python3 perl ruby node awk gawk sed "
+# Fail closed: only the tools a cleanup step is known to need may run.
+dc_allowed_tools=" docker npm pnpm apt-get paccache yay xcrun brew rm "
+# Words these tools take that are not paths, so a folder named ~/cache or ~/image
+# does not stop a command. An rm argument is always a path.
+dc_command_words=" builder image prune cache clean simctl delete unavailable runtime store "
+
+# A steps file names any other tool it runs, so the list stays visible in review.
+dc_allow_tool() { # name
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || dc_invalid_steps "bad tool name: $1."
+  case "$dc_wrapper_tools" in
+    *" $1 "*) dc_invalid_steps "$1 could run anything, so it cannot be a cleanup tool." ;;
+  esac
+  dc_allowed_tools="$dc_allowed_tools$1 "
+}
+
 # Returns 0 when a cleanup command may run; otherwise sets DC_REFUSE_REASON.
 dc_command_allowed() {
-  local start=0 tool arg value
+  local start=0 tool arg value index
   local -a argv
   argv=("$@")
   DC_REFUSE_REASON=""
@@ -224,23 +261,38 @@ dc_command_allowed() {
     DC_REFUSE_REASON="the command is empty"
     return 1
   fi
-  if [[ "${argv[0]##*/}" == sudo ]]; then
-    if [[ "${argv[1]:-}" != -n || "${#argv[@]}" -lt 3 ]]; then
-      DC_REFUSE_REASON="a cleanup step may only use sudo -n, so it never asks for a password"
+  if [[ "${argv[0]}" == sudo ]]; then
+    if [[ "${argv[1]:-}" != -n || "${#argv[@]}" -lt 3 || "${argv[2]}" == -* ]]; then
+      DC_REFUSE_REASON="a cleanup step may only use sudo -n COMMAND, so it never asks for a password"
       return 1
     fi
     start=2
   fi
-  tool="${argv[$start]##*/}"
+  tool="${argv[$start]}"
   case "$tool" in
-    sh | bash | zsh | dash | fish | env | eval | xargs | nohup | exec)
+    */*)
+      DC_REFUSE_REASON="a cleanup tool is named without a path: $tool"
+      return 1
+      ;;
+  esac
+  case "$dc_wrapper_tools" in
+    *" $tool "*)
       DC_REFUSE_REASON="$tool could run anything, so the never-touch list could not be checked"
       return 1
       ;;
+  esac
+  case "$dc_allowed_tools" in
+    *" $tool "*) ;;
+    *)
+      DC_REFUSE_REASON="$tool is not a known cleanup tool"
+      return 1
+      ;;
+  esac
+  case "$tool" in
     docker)
       for arg in "${argv[@]}"; do
         case "$arg" in
-          volume | volumes | --volumes | -v)
+          *volume* | -v)
             DC_REFUSE_REASON="Docker volumes are on the never-touch list"
             return 1
             ;;
@@ -261,18 +313,22 @@ dc_command_allowed() {
       fi
       ;;
   esac
-  for arg in "${argv[@]:$((start + 1))}"; do
+  # Cleanup runs from HOME, so even one relative word can name ~/.ssh or ~/code.
+  for ((index = start + 1; index < ${#argv[@]}; index++)); do
+    arg="${argv[$index]}"
     value="$arg"
-    case "$arg" in --*=*) value="${arg#*=}" ;; esac
-    case "$tool" in
-      rm | rmdir | unlink | mv | shred | trash | find | cp | ln | truncate)
-        case "$value" in -*) continue ;; esac
-        ;;
-      *)
-        # shellcheck disable=SC2088 # A literal tilde is what these patterns match.
-        case "$value" in /* | "~" | "~/"* | */*) ;; *) continue ;; esac
-        ;;
+    case "$arg" in
+      *=*) value="${arg#*=}" ;;
+      --*) continue ;;
+      -?*/*) value="${arg:2}" ;;
+      -*) continue ;;
     esac
+    [[ -n "$value" ]] || continue
+    if [[ "$tool" != rm && "$value" == "$arg" ]]; then
+      case "$dc_command_words" in
+        *" $value "*) continue ;;
+      esac
+    fi
     if dc_path_protected "$value"; then
       DC_REFUSE_REASON="$value: $DC_PROTECT_REASON"
       return 1
@@ -409,8 +465,10 @@ dc_restore_traps() {
 
 # Run argv in its own process group with a hard deadline, a heartbeat, and
 # cancellation of the whole group. Output "-" inherits the terminal; a file gets
-# stdout, and FILE.err gets stderr. Returns the command's status, 124 at the
-# deadline, 125 when the group could not be confirmed gone, or 129/130/143.
+# stdout, and FILE.err gets stderr. Returns the command's status, or 124 only at
+# this deadline. A signal this process saw, or a group that could not be confirmed
+# gone, ends the whole run from here: a command that merely exits 130 is a failed
+# command, not an interrupted run. Never call this from a command substitution.
 dc_bounded() {
   local label="$1" seconds="$2" output="$3"
   shift 3
@@ -447,14 +505,14 @@ dc_bounded() {
       trap '' HUP INT TERM
       dc_stop_group "$child" || signal_status=125
       dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
-      return "$signal_status"
+      exit "$signal_status"
     fi
     if [[ "$now" -gt $((started + seconds)) ]]; then
       echo "    $label passed its ${seconds}s limit, so it was stopped." >&2
       trap '' HUP INT TERM
       if ! dc_stop_group "$child"; then
         dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
-        return 125
+        exit 125
       fi
       dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
       return 124
@@ -464,7 +522,7 @@ dc_bounded() {
       trap '' HUP INT TERM
       if ! dc_stop_group "$child"; then
         dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
-        return 125
+        exit 125
       fi
       dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
       [[ "$status" -ne 0 ]] || status=70
@@ -482,14 +540,10 @@ dc_bounded() {
     esac
   done
   dc_restore_traps "$saved_hup" "$saved_int" "$saved_term"
-  [[ "$signal_status" -eq 0 ]] || return "$signal_status"
+  [[ "$signal_status" -eq 0 ]] || exit "$signal_status"
+  # 124 means this deadline, so a command's own 124 is an ordinary failure.
+  [[ "$status" -ne 124 ]] || status=1
   return "$status"
-}
-
-dc_exit_if_terminal() {
-  case "$1" in
-    125 | 129 | 130 | 143) exit "$1" ;;
-  esac
 }
 
 dc_in_home() {
@@ -510,7 +564,6 @@ dc_query() { # label argv...
   dc_temp
   dc_output="$dc_tempfile"
   dc_bounded "$label" "$DC_OBSERVE_DEADLINE_SECONDS" "$dc_output" dc_in_home "$@" || status=$?
-  dc_exit_if_terminal "$status"
   return "$status"
 }
 
@@ -537,6 +590,8 @@ dc_mutate() { # label argv...
   dc_temp
   dc_output="$dc_tempfile"
   dc_bounded "$label" "$DC_STEP_DEADLINE_SECONDS" "$dc_output" dc_in_home "$@" || status=$?
+  # 77 means refused, so a command's own 77 is an ordinary failure.
+  [[ "$status" -ne 77 ]] || status=1
   return "$status"
 }
 
@@ -583,17 +638,31 @@ dc_match_lanes() {
     }'
 }
 
-# Sets dc_lanes_active (1 when unknown too) and dc_lane_summary.
+# Sets dc_lanes_active, dc_lanes_unknown, and dc_lane_summary. Unknown counts as
+# active: a cleanup that cannot rule a test run out stands down.
 dc_refresh_lanes() {
   local listing matches
   dc_lanes_active=0
+  dc_lanes_unknown=0
   dc_lane_summary=""
+  if ! awk -F '\t' '!/^#/ && $2 != "" { found = 1 } END { exit !found }' "$dc_root/test-lanes.tsv" 2>/dev/null; then
+    dc_lanes_active=1
+    dc_lanes_unknown=1
+    dc_lane_summary="the test-run patterns could not be read, so a test run cannot be ruled out"
+    return 0
+  fi
   if ! listing="$(ps -eww -o pid=,command= 2>/dev/null)" || [[ -z "$listing" ]]; then
     dc_lanes_active=1
+    dc_lanes_unknown=1
     dc_lane_summary="running processes could not be listed, so a test run cannot be ruled out"
     return 0
   fi
-  matches="$(dc_match_lanes <<<"$listing" | awk -F '\t' -v self="$$" '$2 != self')"
+  if ! matches="$(dc_match_lanes <<<"$listing" | awk -F '\t' -v self="$$" '$2 != self')"; then
+    dc_lanes_active=1
+    dc_lanes_unknown=1
+    dc_lane_summary="the process list could not be checked, so a test run cannot be ruled out"
+    return 0
+  fi
   [[ -n "$matches" ]] || return 0
   dc_lanes_active=1
   dc_lane_summary="test processes are running: $(awk -F '\t' '
@@ -617,10 +686,7 @@ cmd_test_lanes() {
     return 1
   fi
   printf '%s\n' "$dc_lane_summary"
-  case "$dc_lane_summary" in
-    "running processes could not"*) return 2 ;;
-  esac
-  return 0
+  [[ "$dc_lanes_unknown" -eq 0 ]] || return 2
 }
 
 # ---- Steps ---------------------------------------------------------------------
@@ -665,6 +731,7 @@ dc_plan_reset() {
   DC_PLAN_STATE="unavailable"
   DC_PLAN_TEXT="its check did not report a result"
   DC_PLAN_COMMAND=""
+  DC_PLAN_BY_HAND=""
   DC_PLAN_QUESTION=""
   DC_PLAN_KEY=""
 }
@@ -687,11 +754,10 @@ dc_act() { # index
   local title="${dc_step_titles[$1]}" fn="${dc_step_ids[$1]//-/_}" status=0
   DC_ACT_TEXT=""
   "dc_act_$fn" || status=$?
-  dc_exit_if_terminal "$status"
   case "$status" in
     0)
       dc_cleared=$((dc_cleared + 1))
-      printf '  %s: cleared. %s\n' "$title" "${DC_ACT_TEXT:-}"
+      printf '  %s: cleared.%s\n' "$title" "${DC_ACT_TEXT:+ $DC_ACT_TEXT}"
       ;;
     77)
       dc_note_failure "$title"
@@ -770,6 +836,9 @@ dc_auto_phase() {
           [[ "$busy" -eq 0 ]] || printf '    Would be skipped right now because %s.\n' "$dc_lane_summary"
         elif ! dc_lock_acquire; then
           printf '  %s: skipped because another Groundwork maintenance run holds the lock.\n' "$title"
+        elif dc_lane_blocks "$i"; then
+          # Planning can take a while, so a test run may have started since.
+          printf '  %s: skipped because %s. The next run tries again.\n' "$title" "$dc_lane_summary"
         else
           printf '  %s: %s\n' "$title" "$DC_PLAN_TEXT"
           dc_act "$i"
@@ -804,8 +873,8 @@ dc_ask() { # question
     fi
     normalized="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in
-      y | yes | t | true | 1) return 0 ;;
-      "" | n | no | f | false | 0) return 1 ;;
+      y | yes) return 0 ;;
+      "" | n | no) return 1 ;;
       *) echo "Please answer y or n." >&2 ;;
     esac
   done
@@ -837,7 +906,8 @@ dc_ask_phase() {
           [[ "${dc_step_lanes[$i]}" != tool || "$dc_lanes_active" -eq 0 ]] \
             || printf '    Would not be offered right now because %s.\n' "$dc_lane_summary"
         elif [[ "$interactive" -eq 0 ]]; then
-          dc_print_would "Not asked because there is no terminal. To clear it yourself"
+          printf '    Not asked because there is no terminal. To clear it yourself: %s\n' \
+            "${DC_PLAN_BY_HAND:-$DC_PLAN_COMMAND}"
         else
           ready_indexes+=("$i")
           ready_keys+=("$DC_PLAN_KEY")
@@ -977,7 +1047,6 @@ dc_report_folders() {
   status=0
   if [[ -s "$list" ]]; then
     dc_bounded "measure folders" "$DC_REPORT_DEADLINE_SECONDS" "$raw" dc_scan_worker "$list" || status=$?
-    dc_exit_if_terminal "$status"
   fi
   LC_ALL=C awk -v home="$HOME/" -v code="$code_scan/" -v home_rows="$home_rows" -v code_rows="$code_rows" '
     function direct_child(path, parent, rest) {
@@ -1026,7 +1095,6 @@ dc_report_path() { # label path note
   local status=0
   [[ -e "$2" ]] || return 0
   dc_measure_kib "$2" || status=$?
-  dc_exit_if_terminal "$status"
   if [[ "$status" -ne 0 || -z "${dc_kib:-}" ]]; then
     printf '  %s: at %s, but it could not be read. %s\n' "$1" "$(dc_home_display "$2")" "${3:-}"
     return 0
@@ -1050,10 +1118,41 @@ dc_report() {
 
 # ---- Run -----------------------------------------------------------------------
 
+# Default stores are recognized by path and shape. A store configured elsewhere needs
+# pnpm's own answer. This query must never download a package manager or a tool.
+dc_load_pnpm_store() {
+  local status=0 store
+  dc_pnpm_store=""
+  command -v pnpm >/dev/null 2>&1 || return 0
+  COREPACK_ENABLE_NETWORK=0 MISE_OFFLINE=1 MISE_AUTO_INSTALL=0 MISE_EXEC_AUTO_INSTALL=0 \
+    MISE_NOT_FOUND_AUTO_INSTALL=0 MISE_TASK_RUN_AUTO_INSTALL=0 \
+    dc_query "pnpm store path" pnpm store path || status=$?
+  store="$(head -n 1 "$dc_output" 2>/dev/null || true)"
+  case "$status:$store" in
+    0:/*[[:cntrl:]]*) ;;
+    0:/*)
+      if dc_canonicalize "$store"; then
+        dc_pnpm_store="$dc_canonical"
+        return 0
+      fi
+      ;;
+  esac
+  dc_pnpm_note="pnpm's store location could not be read, so only its usual locations and shape are recognized."
+}
+
 dc_work=""
+dc_pnpm_note=""
 dc_on_exit() {
   local status=$?
   trap - EXIT
+  case "$status" in
+    129 | 130 | 143)
+      echo "Disk cleanup was interrupted. A step that had already started may have finished part of its work." >&2
+      ;;
+    125)
+      echo "Disk cleanup stopped because a process could not be confirmed gone. A step that had already started may have finished part of its work." >&2
+      ;;
+  esac
   dc_lock_release || true
   [[ -z "$dc_work" ]] || rm -rf -- "$dc_work" || true
   exit "$status"
@@ -1073,11 +1172,13 @@ cmd_run() {
     dc_report
     return 0
   fi
+  dc_load_pnpm_store
   if [[ "$dc_mode" == dry-run ]]; then
     echo "Disk cleanup (dry run: nothing is changed)"
   else
     echo "Disk cleanup"
   fi
+  [[ -z "$dc_pnpm_note" ]] || printf '  %s\n' "$dc_pnpm_note"
   dc_refresh_lanes
   if [[ "$dc_lanes_active" -eq 1 ]]; then
     printf '  Docker and tool-cache steps stand down because %s.\n' "$dc_lane_summary"

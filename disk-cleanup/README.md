@@ -12,7 +12,7 @@ Reference helper for the contract in [docs/disk-cleanup.md](../docs/disk-cleanup
 
 ## A steps file
 
-The steps file is bash, sourced by the runner. It defines functions and reads nothing at load time.
+The steps file is bash, sourced by the runner. It defines functions and settings, and it changes nothing when it loads.
 
 ```bash
 dc_adapter_steps() {
@@ -38,8 +38,9 @@ dc_act_yay_cache() { dc_mutate "yay cache" yay -Sc --aur --noconfirm; }
 
 - `level` is `auto` or `ask`.
 - `lane` is `tool` for a Docker or tool-cache step, which stands down while tests run, or `any`.
-- `dc_plan_<id>` reads only. It sets `DC_PLAN_STATE` to `ready`, `nothing`, `unavailable`, or `elsewhere` (another part of the updater owns it), and `DC_PLAN_TEXT` to one line. A ready step also sets `DC_PLAN_COMMAND`. An ask-first step also sets `DC_PLAN_QUESTION`, and `DC_PLAN_KEY`, an identity compared again before it acts.
-- `dc_act_<id>` changes the machine only through `dc_mutate LABEL COMMAND...`, which runs from `$HOME`, checks the never-touch list, and enforces the deadline. It may set `DC_ACT_TEXT`.
+- `dc_plan_<id>` reads only. It sets `DC_PLAN_STATE` to `ready`, `nothing`, `unavailable`, or `elsewhere` (another part of the updater owns it), and `DC_PLAN_TEXT` to one line. A ready step also sets `DC_PLAN_COMMAND`, and `DC_PLAN_BY_HAND` when a person would do it differently. An ask-first step also sets `DC_PLAN_QUESTION`, and `DC_PLAN_KEY`, an identity of what the question covers, including any size it states, compared again before it acts.
+- `dc_act_<id>` changes the machine only through `dc_mutate LABEL COMMAND...`, which runs from `$HOME`, checks the never-touch list, and enforces the deadline. It may set `DC_ACT_TEXT`. It returns the command's status. A signal the run receives ends the whole run from inside the helper, so a step does not handle one.
+- `dc_allow_tool NAME` names a tool beyond the known set (`docker`, `npm`, `pnpm`, `apt-get`, `paccache`, `yay`, `xcrun`, `brew`, `rm`). A shell, an interpreter, or a wrapper is refused.
 - `dc_query LABEL COMMAND...` runs a bounded read-only query and leaves its stdout in the file named by `dc_output`.
 
 Optional functions:

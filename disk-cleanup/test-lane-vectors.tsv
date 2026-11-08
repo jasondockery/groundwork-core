@@ -19,6 +19,25 @@ package manager test	npm test
 package manager test	npx playwright test
 package manager test	yarn test
 package manager test	node /opt/node/lib/node_modules/npm/bin/npm-cli.js test
+vitest	node vitest run
+vitest	node --no-warnings vitest.mjs run
+vitest	/Users/me/My Projects/node_modules/.bin/vitest run
+vitest	node /Users/me/My Projects/node_modules/vitest/vitest.mjs run
+jest	/Users/me/My Projects/node_modules/.bin/jest --ci
+playwright	/Users/me/My Projects/node_modules/.bin/playwright test
+package manager test	pnpm exec playwright test
+package manager test	pnpm dlx vitest run
+package manager test	bunx vitest run
+package manager test	corepack pnpm test
+package manager test	node /opt/node/lib/node_modules/corepack/dist/corepack.js pnpm test
+-	npm install playwright
+-	npm install vitest
+-	pnpm add -D jest
+-	npx playwright install
+-	npx playwright codegen
+-	pnpm exec playwright install
+-	pnpm dlx playwright install chromium
+-	node /opt/node/bin/npx playwright install
 -	pnpm install
 -	pnpm run build
 -	npm cache verify

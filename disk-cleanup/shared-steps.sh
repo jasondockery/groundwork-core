@@ -109,7 +109,8 @@ dc_act_docker_build_cache() {
   DC_ACT_TEXT="$(grep -E '^Total' "$dc_output" | tail -n 1 | dc_clean_text | tr '\t' ' ' || true)"
 }
 
-# An identity for what image prune would act on: every image and every container.
+# An identity for what image prune would act on: every image and every container,
+# and the size the question states.
 dc_docker_key() {
   local status=0 images
   dc_query "docker image list" docker image ls --all --quiet --no-trunc || status=$?
@@ -118,7 +119,7 @@ dc_docker_key() {
   status=0
   dc_query "docker container list" docker ps --all --quiet --no-trunc || status=$?
   [[ "$status" -eq 0 ]] || return 1
-  DC_PLAN_KEY="$(printf '%s\n' "$images" | cat - "$dc_output" | LC_ALL=C sort | cksum)"
+  DC_PLAN_KEY="$(printf '%s\n' "$images" | cat - "$dc_output" | LC_ALL=C sort | cksum) $dc_df_reclaimable"
 }
 
 dc_plan_docker_images() {
@@ -263,6 +264,16 @@ dc_plan_trash() {
     DC_PLAN_TEXT="the Trash folder is at a protected path: $DC_PROTECT_REASON"
     return 0
   fi
+  if [[ "${DC_TRASH_LAYOUT:-plain}" == freedesktop ]]; then
+    if [[ -L "$DC_TRASH_DIR/info" ]]; then
+      DC_PLAN_TEXT="$(dc_home_display "$DC_TRASH_DIR/info") is a symlink"
+      return 0
+    fi
+    if dc_path_protected "$DC_TRASH_DIR/info"; then
+      DC_PLAN_TEXT="the Trash folder is at a protected path: $DC_PROTECT_REASON"
+      return 0
+    fi
+  fi
   dc_trash_list || status=$?
   if [[ "$status" -ne 0 ]]; then
     DC_PLAN_TEXT="it could not be read, which on macOS usually means this terminal lacks Full Disk Access; Finder can still empty it"
@@ -275,17 +286,27 @@ dc_plan_trash() {
     return 0
   fi
   dc_trash_list_file="$dc_output"
-  DC_PLAN_KEY="$(LC_ALL=C tr '\0' '\n' <"$dc_trash_list_file" | LC_ALL=C sort | cksum)"
   status=0
   dc_measure_kib "$dc_trash_items" || status=$?
   if [[ "$status" -ne 0 ]]; then
     DC_PLAN_TEXT="its size could not be measured, which on macOS usually means this terminal lacks Full Disk Access; Finder can still empty it"
     return 0
   fi
+  DC_PLAN_KEY="$(LC_ALL=C tr '\0' '\n' <"$dc_trash_list_file" | LC_ALL=C sort | cksum) $dc_kib"
   DC_PLAN_STATE="ready"
   DC_PLAN_TEXT="$count item(s), $(dc_format_kib "$dc_kib")."
-  DC_PLAN_COMMAND="empty the Trash in your file manager"
+  DC_PLAN_COMMAND="rm -rf each item, keeping any that holds a Git checkout"
+  DC_PLAN_BY_HAND="empty the Trash in your file manager"
   DC_PLAN_QUESTION="Empty the Trash, $count item(s), $(dc_format_kib "$dc_kib")? This cannot be undone."
+}
+
+# Returns 0 when a Trash item holds a Git checkout at any depth, or when the search
+# could not finish, so an item that cannot be ruled out stays.
+dc_trash_item_holds_checkout() { # item
+  local found status=0
+  [[ ! -L "$1" && -d "$1" ]] || return 1
+  found="$(find "$1" -name .git -print 2>/dev/null)" || status=$?
+  [[ "$status" -ne 0 || -n "$found" ]]
 }
 
 # Runs in its own process group under one deadline. A trashed folder holding a
@@ -293,13 +314,12 @@ dc_plan_trash() {
 dc_trash_worker() { # list kept-file
   local entry name
   while IFS= read -r -d '' entry; do
-    if [[ ! -L "$entry" && -d "$entry" ]] \
-      && [[ -n "$(find "$entry" -maxdepth 3 -name .git -print 2>/dev/null | head -n 1)" ]]; then
+    if dc_trash_item_holds_checkout "$entry"; then
       printf '%s\n' "${entry##*/}" >>"$2"
       continue
     fi
     rm -rf -- "$entry" || continue
-    if [[ "${DC_TRASH_LAYOUT:-plain}" == freedesktop ]]; then
+    if [[ "${DC_TRASH_LAYOUT:-plain}" == freedesktop && ! -L "$DC_TRASH_DIR/info" ]]; then
       name="${entry##*/}"
       rm -f -- "$DC_TRASH_DIR/info/$name.trashinfo" || true
     fi
@@ -307,28 +327,32 @@ dc_trash_worker() { # list kept-file
 }
 
 dc_act_trash() {
-  local before="$dc_kib" status=0 kept="$dc_work/trash-kept" kept_count=0 left=0 after_status=0 name
+  local before="$dc_kib" status=0 kept="$dc_work/trash-kept" kept_count=0 left=0 list_status=0 size_status=0 name
   : >"$kept"
   printf '    Removing the Trash items listed above.\n'
   dc_output=""
   dc_bounded "empty Trash" "$DC_STEP_DEADLINE_SECONDS" - dc_trash_worker "$dc_trash_list_file" "$kept" || status=$?
   [[ "$status" -eq 0 ]] || return "$status"
   kept_count="$(awk 'END { print NR + 0 }' "$kept")"
-  dc_trash_list || after_status=$?
-  [[ "$after_status" -ne 0 ]] || left="$(LC_ALL=C tr -cd '\0' <"$dc_output" | wc -c | tr -d ' ')"
-  after_status=0
-  dc_measure_kib "$dc_trash_items" || after_status=$?
+  dc_trash_list || list_status=$?
+  [[ "$list_status" -ne 0 ]] || left="$(LC_ALL=C tr -cd '\0' <"$dc_output" | wc -c | tr -d ' ')"
+  dc_measure_kib "$dc_trash_items" || size_status=$?
   dc_output=""
-  if [[ "$after_status" -eq 0 && "$dc_kib" -le "$before" ]]; then
+  if [[ "$size_status" -eq 0 && "$dc_kib" -le "$before" ]]; then
     DC_ACT_TEXT="Freed $(dc_format_kib "$((before - dc_kib))")."
   else
     DC_ACT_TEXT="The size afterwards could not be measured."
   fi
   if [[ "$kept_count" -gt 0 ]]; then
-    DC_ACT_TEXT="$DC_ACT_TEXT Kept $kept_count item(s) holding a Git checkout; remove those yourself."
+    DC_ACT_TEXT="$DC_ACT_TEXT Kept $kept_count item(s) that hold a Git checkout or could not be fully searched; remove those yourself."
     while IFS= read -r name; do
       printf '    Kept: %s\n' "$(printf '%s' "$name" | dc_clean_text)"
     done <"$kept"
+  fi
+  # What remains is unknown, so this cannot be called cleared.
+  if [[ "$list_status" -ne 0 ]]; then
+    printf '    The Trash could not be read afterwards, so what remains is unknown.\n'
+    return 1
   fi
   if [[ "$left" -gt "$kept_count" ]]; then
     printf '    %s item(s) could not be removed.\n' "$((left - kept_count))"

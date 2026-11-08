@@ -176,7 +176,7 @@ class Fixture(unittest.TestCase):
     def run_steps(self, *args, env=None):
         return self.run_script("run", "--steps", str(self.steps), *args, env=env)
 
-    def run_pty(self, *args, answers=(), env=None, timeout=60, interrupt_on=None, interrupt_when=None):
+    def run_pty(self, *args, answers=(), env=None, timeout=60, interrupt_on=None, interrupt_when=None, before_answer=None):
         """Drive the prompts on a real terminal. Returns (exit status, output)."""
         merged = dict(self.env, **(env or {}))
         pid, master = pty.fork()
@@ -201,6 +201,8 @@ class Fixture(unittest.TestCase):
                         break
                     output += chunk
                 if pending and output.count(b"[y/N] ") + output.count(b"Please answer") > answered:
+                    if before_answer and answered in before_answer:
+                        before_answer[answered]()
                     answered += 1
                     os.write(master, pending.pop(0))
                 due = interrupt_on and interrupt_on.encode() in output
@@ -336,12 +338,33 @@ class NeverTouchTest(Fixture):
             ["rm", "-rf", f"{self.home}/.aws"],
             ["rm", "-rf", f"{self.home}/project/src"],
             ["find", f"{self.home}/code", "-delete"],
-            ["tool", f"--path={self.home}/.ssh"],
+            ["unknown-tool", "x"],
+            ["/usr/bin/docker", "builder", "prune"],
+            ["brew", f"--path={self.home}/.ssh"],
+            ["npm", "cache", "clean", "--force", "--cache=.ssh"],
+            ["npm", "cache", "clean", "--force", "--cache=code"],
+            ["npm", "cache", "clean", "--force", "--cache", ".aws"],
+            ["paccache", "-r", "-c", ".ssh"],
+            ["paccache", f"-c{self.home}/.ssh"],
+            ["docker", "builder", "prune", "--volumes=true"],
             ["bash", "-c", "rm -rf ~/.ssh"],
             ["env", "rm", "-rf", "x"],
+            ["nice", "rm", "-rf", ".ssh"],
+            ["nice", "-n", "10", "rm", "-rf", ".ssh"],
+            ["timeout", "60", "docker", "volume", "prune", "--force"],
+            ["command", "rm", "-rf", ".ssh"],
+            ["busybox", "rm", "-rf", ".ssh"],
+            ["python3", "-c", "x"],
             ["sudo", "paccache", "-r"],
             ["sudo", "-n", "rm", "-rf", "/"],
             ["sudo", "-n", "docker", "volume", "prune"],
+            ["sudo", "-n", "-E", "docker", "volume", "prune"],
+            ["sudo", "-n", "--", "docker", "volume", "prune"],
+            ["sudo", "-n", "-u", "root", "rm", "-rf", ".ssh"],
+            ["sudo", "-n", "env", "rm", "-rf", "x"],
+            ["/usr/bin/sudo", "-n", "paccache", "-ruk1"],
+            ["sudo"],
+            ["sudo", "-n"],
         )
         for argv in refused:
             result = self.run_script("check-command", "--", *argv)
@@ -355,14 +378,76 @@ class NeverTouchTest(Fixture):
             ["sudo", "-n", "paccache", "-ruk1"],
             ["sudo", "-n", "apt-get", "clean"],
             ["rm", "-f", f"{self.home}/.npm/old"],
+            ["xcrun", "simctl", "delete", "unavailable"],
+            ["xcrun", "simctl", "runtime", "delete", "ABC-123"],
+            ["yay", "-Sc", "--aur", "--noconfirm"],
         )
         for argv in allowed:
             self.assertEqual(self.run_script("check-command", "--", *argv).returncode, 0, argv)
+
+    def test_a_refusal_says_why(self):
+        for argv, reason in (
+            (["nice", "rm", "-rf", ".ssh"], "could run anything"),
+            (["env", "rm", "-rf", "x"], "could run anything"),
+            (["sudo", "-n", "env", "rm"], "could run anything"),
+            (["sudo", "paccache", "-r"], "sudo -n COMMAND"),
+            (["sudo", "-n", "-E", "paccache", "-r"], "sudo -n COMMAND"),
+            (["sudo", "-n", "--", "paccache", "-r"], "sudo -n COMMAND"),
+            (["unknown-tool"], "not a known cleanup tool"),
+            (["/usr/bin/docker", "image", "prune"], "without a path"),
+        ):
+            self.assertIn(reason, self.run_script("check-command", "--", *argv).stdout, argv)
+
+    def test_a_folder_named_like_a_subcommand_does_not_stop_a_command(self):
+        (self.home / "builder/.git").mkdir(parents=True)
+        (self.home / "cache/.git").mkdir(parents=True)
+        self.assertEqual(self.run_script("check-command", "--", "docker", "builder", "prune").returncode, 0)
+        self.assertEqual(self.run_script("check-command", "--", "npm", "cache", "clean", "--force").returncode, 0)
+        # An rm argument is always a path.
+        self.assertEqual(self.run_script("check-command", "--", "rm", "-rf", "cache").returncode, 1)
+
+    def test_a_steps_file_can_name_a_tool_but_never_a_wrapper(self):
+        for wrapper in ("env", "nice", "timeout", "bash", "python3", "busybox", "sudo"):
+            self.steps.write_text(f'dc_adapter_steps() {{ dc_allow_tool {wrapper}; }}\n')
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, wrapper)
+            self.assertIn("could run anything", result.stderr, wrapper)
+        self.steps.write_text('dc_adapter_steps() { dc_allow_tool "bad name"; }\n')
+        self.assertEqual(self.run_steps().returncode, 1)
+        self.assertEqual(self.commands(), [])
+
+    def test_a_pnpm_store_anywhere_is_recognized_by_its_shape(self):
+        (self.home / "custom-store/v10/files").mkdir(parents=True)
+        self.assertTrue(self.protected(self.home / "custom-store/v10"))
+        self.assertTrue(self.protected(self.home / "custom-store/v10/files/00/abc"))
+        (self.home / "release/v10").mkdir(parents=True)
+        self.assertFalse(self.protected(self.home / "release/v10/notes"))
+
+    def pnpm_tool(self, body):
+        self.write_tool("pnpm", '#!/bin/bash\nprintf "pnpm %s net=%s offline=%s\\n" "$*" "${COREPACK_ENABLE_NETWORK:-}" "${MISE_OFFLINE:-}" >>"$FAKE_LOG"\n' + body)
+
+    def test_pnpms_own_store_is_protected_and_the_query_cannot_download(self):
+        store = self.home / "elsewhere-store"
+        self.pnpm_tool(f'echo {store}\n')
+        (self.state / "npm-cache-path").write_text(f"{store}/npm\n")
+        result = self.run_steps()
+        self.assertIn("pnpm store path net=0 offline=1", self.commands())
+        self.assertIn("in the pnpm store", result.stdout)
+        self.assertNotIn("npm cache clean --force", self.commands())
+
+    def test_a_failed_pnpm_query_is_said_and_never_called_clean(self):
+        for body in ("exit 1\n", "echo not-absolute\n", "printf '/x\\033y\\n'\n"):
+            self.pnpm_tool(body)
+            result = self.run_steps("--dry-run")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("pnpm's store location could not be read", result.stdout, body)
+        self.assertNotIn("\033", result.stdout)
 
     def test_a_hostile_step_is_refused_before_it_runs(self):
         self.write_tool("logged", '#!/bin/bash\nprintf "logged %s\\n" "$*" >>"$FAKE_LOG"\n')
         self.steps.write_text(textwrap.dedent("""\
             dc_adapter_steps() {
+              dc_allow_tool logged
               dc_step auto any wipe-volumes "Volumes"
               dc_step auto any wipe-ssh "SSH"
               dc_step auto any harmless "Harmless"
@@ -433,7 +518,7 @@ class TestLaneTest(Fixture):
         self.fake_ps("  20 pnpm test\n")
         self.write_tool("logged", '#!/bin/bash\nprintf "logged %s\\n" "$*" >>"$FAKE_LOG"\n')
         self.steps.write_text(textwrap.dedent("""\
-            dc_adapter_steps() { dc_step auto any unrelated "Unrelated"; }
+            dc_adapter_steps() { dc_allow_tool logged; dc_step auto any unrelated "Unrelated"; }
             dc_plan_unrelated() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
             dc_act_unrelated() { dc_mutate u logged go; }
             """))
@@ -446,6 +531,36 @@ class TestLaneTest(Fixture):
         self.assertIn("could not be listed", result.stdout)
         self.assertEqual([c for c in self.commands() if "prune" in c or "clean" in c], [])
         self.assert_no_mutation()
+
+    def test_missing_or_empty_patterns_stand_down(self):
+        self.fake_ps("  20 node /w/node_modules/vitest/vitest.mjs run\n")
+        with tempfile.TemporaryDirectory() as temp:
+            copy = Path(temp) / "disk-cleanup"
+            shutil.copytree(DIR, copy)
+            script = copy / "disk-cleanup.sh"
+            patterns = copy / "test-lanes.tsv"
+            for broken in ("missing", "only comments"):
+                if broken == "missing":
+                    patterns.unlink()
+                else:
+                    patterns.write_text("# nothing here\n")
+                result = subprocess.run([str(script), "test-lanes"], env=self.env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, broken)
+                self.assertIn("patterns could not be read", result.stdout, broken)
+                result = subprocess.run([str(script), "run", "--steps", str(self.steps)], env=self.env,
+                                        stdin=subprocess.DEVNULL, capture_output=True, text=True)
+                self.assertIn("patterns could not be read", result.stdout, broken)
+                self.assert_no_mutation()
+
+    def test_a_lane_that_starts_while_a_step_plans_stops_that_step(self):
+        self.fake_ps("  10 /sbin/launchd\n")
+        self.write_tool("docker", FAKE_DOCKER.replace(
+            '"system df") cat "$state/df" ;;',
+            '"system df") printf "  20 pnpm test\\n" >"$FAKE_STATE/ps-listing"; cat "$state/df" ;;',
+        ))
+        result = self.run_steps()
+        self.assertIn("Docker build cache: skipped because test processes are running", result.stdout)
+        self.assertEqual([c for c in self.commands() if "prune" in c], [])
 
     def test_a_lane_that_starts_later_stops_the_next_step(self):
         # The npm step starts a lane; the Docker step must see it.
@@ -546,6 +661,25 @@ class AutomaticTest(Fixture):
         self.assertIn("disk says no", result.stdout)
         self.assertIn("1 failed step(s): npm cache", result.stdout)
         self.assertIn("docker builder prune --all --force --filter until=168h", self.commands())
+        self.assertIn("Disk report", result.stdout)
+
+    def test_a_command_that_exits_130_is_a_failed_step_not_an_interrupted_run(self):
+        for status in (125, 129, 130, 143):
+            self.log.write_text("")
+            self.write_tool("npm", FAKE_NPM.replace('"cache clean") rm -rf "$HOME/.npm/_cacache" ;;',
+                                                    f'"cache clean") exit {status} ;;'))
+            result = self.run_steps()
+            self.assertEqual(result.returncode, 1, status)
+            self.assertIn(f"npm cache: failed (exit {status})", result.stdout)
+            self.assertIn("Disk report", result.stdout)
+            self.assertIn("docker builder prune --all --force --filter until=168h", self.commands())
+            self.assertNotIn("interrupted", result.stderr)
+
+    def test_a_query_that_exits_130_does_not_end_the_run(self):
+        self.write_tool("npm", '#!/bin/bash\nexit 130\n')
+        result = self.run_steps()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm did not say where its cache is", result.stdout)
         self.assertIn("Disk report", result.stdout)
 
     def test_terminal_control_bytes_in_tool_output_are_removed(self):
@@ -652,6 +786,34 @@ class PromptTest(Fixture):
         self.assertIn("Unused Docker images: skipped because it changed after the question", output)
         self.assertNotIn("docker image prune --all --force", self.commands())
 
+    def test_a_larger_trash_after_the_question_stops_the_step(self):
+        grow = lambda: self.fill(self.home / ".Trash/old-report.pdf", 4096)
+        code, output = self.run_pty(answers=[b"n\n", b"y\n"], before_answer={1: grow})
+        self.assertEqual(code, 0, output)
+        self.assertIn("Trash: skipped because it changed after the question", output)
+        self.assertTrue((self.home / ".Trash/old-report.pdf").exists())
+
+    def test_a_new_reclaimable_size_after_the_question_stops_the_step(self):
+        change = lambda: self.docker_state(df=(
+            "Images|12|2|90GB|50GB (55%)\nBuild Cache|40|0|7GB|7GB\n"))
+        code, output = self.run_pty(answers=[b"y\n", b"n\n"], before_answer={0: change})
+        self.assertEqual(code, 0, output)
+        self.assertIn("Unused Docker images: skipped because it changed after the question", output)
+        self.assertNotIn("docker image prune --all --force", self.commands())
+
+    def test_only_y_or_yes_is_a_yes(self):
+        for answer in (b"t", b"true", b"1", b"yep", b"on"):
+            self.log.write_text("")
+            code, output = self.run_pty(answers=[answer + b"\n", b"n\n", b"n\n"])
+            self.assertEqual(code, 0, output)
+            self.assertIn("Please answer y or n.", output, answer)
+            self.assertNotIn("docker image prune --all --force", self.commands(), answer)
+        for answer in (b"y", b"Y", b"yes", b"YES"):
+            self.log.write_text("")
+            code, output = self.run_pty(answers=[answer + b"\n", b"n\n"])
+            self.assertEqual(code, 0, output)
+            self.assertIn("docker image prune --all --force", self.commands(), answer)
+
     def test_nothing_ready_asks_nothing(self):
         self.docker_state(df="Images|1|1|1GB|0B (0%)\nBuild Cache|0|0|0B|0B\n")
         (self.home / ".Trash/old-report.pdf").unlink()
@@ -684,7 +846,67 @@ class TrashTest(Fixture):
         self.assertTrue((self.home / ".Trash/parent/nested/.git").exists())
         self.assertFalse((self.home / ".Trash/old-report.pdf").exists())
         self.assertIn("Kept: some-repo", output)
-        self.assertIn("Kept 2 item(s) holding a Git checkout", output)
+        self.assertIn("Kept 2 item(s) that hold a Git checkout", output)
+
+    def test_a_checkout_at_any_depth_stays_with_its_files(self):
+        deep = self.home / ".Trash/Archive/a/b/c/d/e"
+        (deep / ".git").mkdir(parents=True)
+        self.fill(deep / "only-copy.txt", 4)
+        code, output = self.empty_trash()
+        self.assertEqual(code, 0, output)
+        self.assertTrue((deep / "only-copy.txt").exists())
+        self.assertIn("Kept: Archive", output)
+
+    def test_a_folder_that_cannot_be_fully_searched_stays(self):
+        self.fill(self.home / ".Trash/Sealed/file", 4)
+        real = shutil.which("find", path="/bin:/usr/bin")
+        self.write_tool("find", (
+            '#!/bin/bash\nfor a in "$@"; do [[ "$a" != -name || "$*" != *Sealed* ]] || { echo denied >&2; exit 1; }; done\n'
+            f'exec {real} "$@"\n'
+        ))
+        code, output = self.empty_trash()
+        self.assertEqual(code, 0, output)
+        self.assertTrue((self.home / ".Trash/Sealed/file").exists())
+        self.assertIn("could not be fully searched", output)
+
+    def test_a_symlinked_info_folder_cannot_reach_a_protected_path(self):
+        trash = self.home / ".local/share/Trash"
+        self.fill(trash / "files/old.txt", 4)
+        (self.home / ".ssh").mkdir()
+        (self.home / ".ssh/old.txt.trashinfo").write_text("keep me\n")
+        (trash / "info").symlink_to(self.home / ".ssh")
+        self.steps.write_text(STEPS.replace('"$HOME/.Trash"', '"$HOME/.local/share/Trash"') + "DC_TRASH_LAYOUT=freedesktop\n")
+        result = self.run_steps()
+        self.assertIn("Trash/info is a symlink", result.stdout)
+        # Only the Docker question is asked.
+        code, output = self.run_pty(answers=[b"n\n"])
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("Empty the Trash", output)
+        self.assertEqual((self.home / ".ssh/old.txt.trashinfo").read_text(), "keep me\n")
+        self.assertTrue((trash / "files/old.txt").exists())
+
+    def test_a_failed_recount_is_a_failed_step_not_cleared(self):
+        real_rm = shutil.which("rm", path="/bin:/usr/bin")
+        real_find = shutil.which("find", path="/bin:/usr/bin")
+        self.write_tool("rm", (
+            '#!/bin/bash\nfor a in "$@"; do [[ "$a" != *old-report* ]] || exit 1; done\n'
+            f'exec {real_rm} "$@"\n'
+        ))
+        (self.state / "rm-ran").write_text("")
+        self.write_tool("find", (
+            '#!/bin/bash\n'
+            'if [[ "$*" == *-print0* ]]; then\n'
+            '  count=$(cat "$FAKE_STATE/lists" 2>/dev/null || echo 0)\n'
+            '  echo $((count + 1)) >"$FAKE_STATE/lists"\n'
+            '  if [[ "$count" -ge 2 ]]; then echo denied >&2; exit 1; fi\n'
+            'fi\n'
+            f'exec {real_find} "$@"\n'
+        ))
+        code, output = self.empty_trash()
+        self.assertEqual(code, 1, output)
+        self.assertNotIn("Trash: cleared", output)
+        self.assertIn("what remains is unknown", output)
+        self.assertIn("1 failed step(s): Trash", output)
 
     def test_an_item_that_is_a_symlink_goes_but_its_target_stays(self):
         self.fill(self.home / "target/file", 4)
@@ -912,6 +1134,7 @@ class BoundedTest(Fixture):
         ))
         self.steps.write_text(textwrap.dedent("""\
             dc_adapter_steps() {
+              dc_allow_tool hang
               dc_step auto any stuck "Stuck"
               dc_step auto any after "After"
             }
@@ -961,7 +1184,7 @@ class BoundedTest(Fixture):
     def test_a_process_left_behind_does_not_count_as_success(self):
         self.write_tool("leaky", '#!/bin/bash\nsleep 300 &\necho $! >"$FAKE_STATE/hang.pids"\nexit 0\n')
         self.steps.write_text(textwrap.dedent("""\
-            dc_adapter_steps() { dc_step auto any leaky "Leaky"; }
+            dc_adapter_steps() { dc_allow_tool leaky; dc_step auto any leaky "Leaky"; }
             dc_plan_leaky() { DC_PLAN_STATE=ready; DC_PLAN_TEXT=x; }
             dc_act_leaky() { dc_mutate leaky leaky; }
             """))
