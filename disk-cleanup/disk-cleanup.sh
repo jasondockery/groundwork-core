@@ -141,7 +141,8 @@ dc_canonicalize() {
   case "$remainder/" in
     */../* | */./*) return 1 ;;
   esac
-  if [[ -d "$path" && -L "$path" ]]; then
+  # A last name of . or .. is not a name to keep: it means another folder entirely.
+  if [[ -d "$path" && (-L "$path" || "${path##*/}" == . || "${path##*/}" == ..) ]]; then
     path="$(cd -P -- "$path" 2>/dev/null && pwd -P)" || return 1
   elif [[ "$path" != "/" ]]; then
     # Resolve the parent without entering the path itself, because macOS can ask for

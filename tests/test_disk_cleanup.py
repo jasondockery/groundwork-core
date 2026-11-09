@@ -317,6 +317,17 @@ class NeverTouchTest(Fixture):
         self.assertTrue(self.protected(self.home / "safe/../.ssh"))
         self.assertTrue(self.protected(self.home / "nothing-here/../.ssh"))
 
+    def test_a_path_ending_in_a_dot_means_the_folder_it_names(self):
+        for path in (".", "..", "~/.", "~/..", "/.", "/..", "~/safe/..", "~/safe/../.", f"{self.home}/safe/..",
+                     "~/.ssh/.", "~/.ssh/.."):
+            self.assertTrue(self.protected(path), path)
+        for path in ("~/safe/.", "~/safe/x/..", f"{self.home}/safe/."):
+            (self.home / "safe/x").mkdir(exist_ok=True)
+            self.assertFalse(self.protected(path), path)
+        for operand in (["--cache", "."], ["--cache", ".."], ["--cache=."], ["--cache=.."], ["--cache", "~/safe/.."]):
+            result = self.run_script("check-command", "--", "npm", "cache", "clean", "--force", *operand)
+            self.assertEqual(result.returncode, 1, operand)
+
     def test_ordinary_paths_pass(self):
         for path in (self.home / "safe", self.home / "safe/x", self.home / ".npm", self.home / ".Trash/x", self.tmp):
             self.assertFalse(self.protected(path), path)
@@ -479,6 +490,8 @@ class NeverTouchTest(Fixture):
             "dc_allow_command_prefix bash",
             "dc_allow_command rm -rf .ssh",
             'dc_allow_command rm -rf "$HOME/code"',
+            "dc_allow_command logged .",
+            "dc_allow_command logged ..",
             "dc_allow_command logged .ssh",
             'dc_allow_command logged "$HOME/.ssh/id"',
             'dc_allow_command logged --path="$HOME/.aws"',
