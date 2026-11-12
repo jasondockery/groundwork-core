@@ -1,0 +1,14 @@
+# Paths disk cleanup never deletes, moves, or prunes. Anything inside one, and any
+# folder that contains one, is refused. Format: path<TAB>why.
+# disk-cleanup.sh also refuses any .git directory, any folder inside a Git checkout,
+# any pnpm store, and any docker/volumes path, wherever they are.
+~/.t3	T3 Code threads and settings
+~/.aws	cloud credentials
+~/.ssh	SSH keys
+~/.config/gh	GitHub CLI sign-in
+~/code	repository checkouts
+~/.colima	the Colima VM, which holds Docker volumes
+~/.lima	the Lima VMs, which hold Docker volumes
+~/Library/Containers/com.docker.docker	Docker Desktop's VM, which holds Docker volumes
+~/.local/share/containers	Podman images and volumes
+/var/lib/docker	Docker's data, which holds Docker volumes
